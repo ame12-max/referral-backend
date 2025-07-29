@@ -2,6 +2,7 @@ const db = require('../config/db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
+
 const JWT_SECRET = process.env.JWT_SECRET || 'yourSecretKey';
 
 const registerUser = async (req, res) => {
@@ -167,10 +168,83 @@ const getTeam = async (req, res) => {
   }
 };
 
+const getAccountData = async (req, res) => {
+  try {
+    const [userRows] = await db.query(
+      `SELECT 
+        id, phone, invite_code, 
+        total_balance, recharged_balance, withdrawable_balance
+      FROM users 
+      WHERE id = ?`,
+      [req.user.id]
+    );
+    
+    if (userRows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        msg: "User not found" 
+      });
+    }
+    
+    const user = userRows[0];
+    
+    // Get bank info if exists
+    const [bankRows] = await db.query(
+      "SELECT bank_name, account_holder, account_number FROM bank_details WHERE user_id = ?",
+      [req.user.id]
+    );
+    
+    res.status(200).json({
+      success: true,
+      user: {
+        ...user,
+        bank: bankRows[0] || null
+      }
+    });
+  } catch (err) {
+    console.error("⚠️ Account Data Error:", err);
+    res.status(500).json({ 
+      success: false,
+      msg: "Server error during account data fetch",
+      error: err.message
+    });
+  }
+};
+
+// Token verification endpoint for debugging
+const verifyToken = async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'No token provided' 
+    });
+  }
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    res.json({
+      success: true,
+      valid: true,
+      userId: decoded.id,
+      expiresAt: new Date(decoded.exp * 1000).toLocaleString()
+    });
+  } catch (error) {
+    res.status(401).json({
+      success: false,
+      valid: false,
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   saveBankInfo,
   getBankInfo,
   getTeam,
+  getAccountData,
+  verifyToken // Add this for debugging
 };

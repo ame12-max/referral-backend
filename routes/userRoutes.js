@@ -1,21 +1,28 @@
 const express = require('express');
 const router = express.Router();
+const { protect } = require('../middleware/authMiddleware');
+
 const {
   registerUser,
   loginUser,
   saveBankInfo,
   getBankInfo,
-  getTeam
+  getTeam,
+  getAccountData,
+  verifyToken
 } = require('../controllers/userController');
 
+// Public routes
 router.post('/register', registerUser);
 router.post('/login', loginUser);
+router.get('/verify-token', verifyToken); // Debug endpoint
 
-// ✅ Add these routes if missing:
-router.post('/:id/bank', saveBankInfo);
-router.get('/:id/bank', getBankInfo);
+// Protected routes (require authentication)
+router.get('/account', protect, getAccountData);
+router.get('/team', protect, getTeam);
 
-// ✅ Optional: Team route
-router.get('/:id/team', getTeam);
+// User-specific bank routes
+router.post('/:id/bank', protect, saveBankInfo);
+router.get('/:id/bank', protect, getBankInfo);
 
 module.exports = router;
