@@ -82,91 +82,97 @@ const loginUser = async (req, res) => {
   }
 };
 
-const saveBankInfo = async (req, res) => {
-  const { id } = req.params;
-  const { bank, name, number } = req.body;
-
-  if (!bank || !name || !number) {
-    return res.status(400).json({ msg: "All bank fields are required." });
-  }
-
-  try {
-    // Remove .promise() - use db.query() directly
-    const [existing] = await db.query(
-      "SELECT * FROM bank_details WHERE user_id = ?",
-      [id]
-    );
-
-    if (existing.length > 0) {
-      // Update existing record
-      await db.query(
-        "UPDATE bank_details SET bank_name = ?, account_holder = ?, account_number = ? WHERE user_id = ?",
-        [bank, name, number, id]
-      );
-    } else {
-      // Insert new record
-      await db.query(
-        "INSERT INTO bank_details (user_id, bank_name, account_holder, account_number) VALUES (?, ?, ?, ?)",
-        [id, bank, name, number]
-      );
-    }
-
-    res.status(200).json({ bank_name: bank, account_holder: name, account_number: number });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Server error." });
-  }
-};
-
-const getBankInfo = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    // Remove .promise() - use db.query() directly
-    const [rows] = await db.query(
-      "SELECT bank_name, account_holder, account_number FROM bank_details WHERE user_id = ?",
-      [id]
-    );
-    if (!rows.length) return res.status(404).json({ msg: "Bank info not found" });
-    res.status(200).json(rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Failed to get bank info" });
-  }
-};
 
 const getTeam = async (req, res) => {
-  const { id } = req.params;
-
   try {
-    // Remove .promise() - use db.query() directly
+    const userId = req.user.id;
+    
+    // Get current user's invite code
+    const [userData] = await db.query(
+      `SELECT invite_code FROM users WHERE id = ?`,
+      [userId]
+    );
+    
+    if (!userData || userData.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    
+    const currentInviteCode = userData[0].invite_code;
+
+    // Level 1: Direct referrals
     const [level1] = await db.query(
-      `SELECT phone FROM users 
-       WHERE level1_id = ? AND recharged_balance > 0 
-       AND id IN (SELECT user_id FROM orders)`,
-      [id]
+      `SELECT 
+        u.id, 
+        COALESCE(u.name, 'Unnamed Member') AS name,
+        u.phone,
+        u.created_at AS joinedAt,
+        COALESCE(SUM(e.amount), 0) AS earned,
+        1 AS level
+      FROM users u
+      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
+      WHERE u.invited_by = ?
+      GROUP BY u.id`,
+      [currentInviteCode]
     );
 
+    // Level 2: Referrals of referrals
     const [level2] = await db.query(
-      `SELECT phone FROM users 
-       WHERE level2_id = ? AND recharged_balance > 0 
-       AND id IN (SELECT user_id FROM orders)`,
-      [id]
+      `SELECT 
+        u.id,
+        COALESCE(u.name, 'Unnamed Member') AS name,
+        u.phone,
+        u.created_at AS joinedAt,
+        COALESCE(SUM(e.amount), 0) AS earned,
+        2 AS level
+      FROM users u
+      JOIN users u1 ON u.invited_by = u1.invite_code
+      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
+      WHERE u1.invited_by = ?
+      GROUP BY u.id`,
+      [currentInviteCode]
     );
 
+    // Level 3: Referrals of referrals of referrals
     const [level3] = await db.query(
-      `SELECT phone FROM users 
-       WHERE level3_id = ? AND recharged_balance > 0 
-       AND id IN (SELECT user_id FROM orders)`,
-      [id]
+      `SELECT 
+        u.id,
+        COALESCE(u.name, 'Unnamed Member') AS name,
+        u.phone,
+        u.created_at AS joinedAt,
+        COALESCE(SUM(e.amount), 0) AS earned,
+        3 AS level
+      FROM users u
+      JOIN users u1 ON u.invited_by = u1.invite_code
+      JOIN users u2 ON u1.invited_by = u2.invite_code
+      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
+      WHERE u2.invited_by = ?
+      GROUP BY u.id`,
+      [currentInviteCode]
     );
 
-    res.json({ level1, level2, level3 });
+    const members = [...level1, ...level2, ...level3];
+    
+    res.json({
+      success: true,
+      members,
+      totalMembers: members.length,
+      totalEarnings: members.reduce((sum, m) => sum + parseFloat(m.earned), 0),
+      level1Count: level1.length,
+      level2Count: level2.length,
+      level3Count: level3.length
+    });
+
   } catch (err) {
-    console.error("Team Fetch Error:", err);
-    res.status(500).json({ msg: "Server error" });
+    console.error('getTeam error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error fetching team data' 
+    });
   }
 };
+
+// ... other controller functions ...
+
 
 const getAccountData = async (req, res) => {
   try {
@@ -239,10 +245,26 @@ const verifyToken = async (req, res) => {
   }
 };
 
+const getBankInfo = async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    const [rows] = await db.query(
+      "SELECT bank_name, account_holder, account_number FROM bank_details WHERE user_id = ?",
+      [userId]
+    );
+    
+    if (!rows.length) return res.status(404).json({ msg: "Bank info not found" });
+    res.status(200).json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Failed to get bank info" });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
-  saveBankInfo,
   getBankInfo,
   getTeam,
   getAccountData,
