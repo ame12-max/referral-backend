@@ -1,36 +1,39 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const { authenticateUser } = require('../middleware/auth');
 
-// ✅ Get recharge history for a user
-router.get('/user/:id/recharges', async (req, res) => {
-  const userId = req.params.id;
-
+// Get user's recharge transactions
+router.get('/recharges', authenticateUser, async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT * FROM recharges WHERE user_id = ? ORDER BY created_at DESC',
-      [userId]
+      `SELECT id, amount, method, status, created_at 
+       FROM recharges 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC`,
+      [req.user.id]
     );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error fetching recharges:', error);
-    res.status(500).json({ error: 'Failed to fetch recharges' });
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error('Recharges error:', err);
+    res.status(500).json({ error: 'Server error fetching recharges' });
   }
 });
 
-// ✅ Get withdrawal history for a user
-router.get('/user/:id/withdrawals', async (req, res) => {
-  const userId = req.params.id;
-
+// Get user's withdrawal transactions
+router.get('/withdrawals', authenticateUser, async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT * FROM withdrawals WHERE user_id = ? ORDER BY created_at DESC',
-      [userId]
+      `SELECT id, amount, status, account_number, created_at 
+       FROM withdrawals 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC`,
+      [req.user.id]
     );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error fetching withdrawals:', error);
-    res.status(500).json({ error: 'Failed to fetch withdrawals' });
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error('Withdrawals error:', err);
+    res.status(500).json({ error: 'Server error fetching withdrawals' });
   }
 });
 
