@@ -9,13 +9,14 @@ router.post('/register', userController.registerUser);
 // Login
 router.post('/login', userController.loginUser);
 
-// Get bank info (protected)
+// Bank endpoints
 router.get('/bank', authenticateUser, userController.getBankInfo);
+router.put('/bank', authenticateUser, userController.updateBankInfo);
 
-// Get team data (protected)
+// Team data
 router.get('/team', authenticateUser, userController.getTeam);
 
-// Get account data (protected)
+// Account data
 router.get('/account', authenticateUser, userController.getAccountData);
 
 // Token verification

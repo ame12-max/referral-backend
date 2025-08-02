@@ -2,7 +2,6 @@ const db = require('../config/db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-
 const JWT_SECRET = process.env.JWT_SECRET || 'yourSecretKey';
 
 const registerUser = async (req, res) => {
@@ -13,7 +12,6 @@ const registerUser = async (req, res) => {
   }
 
   try {
-    // Remove .promise() - use db.query() directly
     const [existing] = await db.query("SELECT * FROM users WHERE phone = ?", [phone]);
     if (existing.length > 0) {
       return res.status(409).json({ msg: "Phone already registered" });
@@ -53,7 +51,6 @@ const loginUser = async (req, res) => {
   }
 
   try {
-    // Remove .promise() - use db.query() directly
     const [rows] = await db.query("SELECT * FROM users WHERE phone = ?", [phone]);
     if (rows.length === 0) return res.status(404).json({ msg: "User not found." });
 
@@ -82,12 +79,10 @@ const loginUser = async (req, res) => {
   }
 };
 
-
 const getTeam = async (req, res) => {
   try {
     const userId = req.user.id;
     
-    // Get current user's invite code
     const [userData] = await db.query(
       `SELECT invite_code FROM users WHERE id = ?`,
       [userId]
@@ -166,13 +161,11 @@ const getTeam = async (req, res) => {
     console.error('getTeam error:', err);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error fetching team data' 
+      message: 'Server error fetching team data',
+      error: err.message 
     });
   }
 };
-
-// ... other controller functions ...
-
 
 const getAccountData = async (req, res) => {
   try {
@@ -194,7 +187,6 @@ const getAccountData = async (req, res) => {
     
     const user = userRows[0];
     
-    // Get bank info if exists
     const [bankRows] = await db.query(
       "SELECT bank_name, account_holder, account_number FROM bank_details WHERE user_id = ?",
       [req.user.id]
@@ -208,7 +200,7 @@ const getAccountData = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("⚠️ Account Data Error:", err);
+    console.error("Account Data Error:", err);
     res.status(500).json({ 
       success: false,
       msg: "Server error during account data fetch",
@@ -217,7 +209,6 @@ const getAccountData = async (req, res) => {
   }
 };
 
-// Token verification endpoint for debugging
 const verifyToken = async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   
@@ -262,11 +253,52 @@ const getBankInfo = async (req, res) => {
   }
 };
 
+const updateBankInfo = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { bank, name, number } = req.body;
+
+    if (!bank || !name || !number) {
+      return res.status(400).json({ msg: "All bank fields are required." });
+    }
+
+    const [existing] = await db.query(
+      "SELECT * FROM bank_details WHERE user_id = ?",
+      [userId]
+    );
+
+    if (existing.length > 0) {
+      await db.query(
+        "UPDATE bank_details SET bank_name = ?, account_holder = ?, account_number = ? WHERE user_id = ?",
+        [bank, name, number, userId]
+      );
+    } else {
+      await db.query(
+        "INSERT INTO bank_details (user_id, bank_name, account_holder, account_number) VALUES (?, ?, ?, ?)",
+        [userId, bank, name, number]
+      );
+    }
+
+    res.status(200).json({ 
+      bank_name: bank, 
+      account_holder: name, 
+      account_number: number 
+    });
+  } catch (err) {
+    console.error("Bank save error:", err);
+    res.status(500).json({ 
+      msg: "Server error",
+      error: err.message
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getBankInfo,
+  updateBankInfo,
   getTeam,
   getAccountData,
-  verifyToken // Add this for debugging
+  verifyToken
 };
