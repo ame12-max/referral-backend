@@ -172,30 +172,36 @@ const getAccountData = async (req, res) => {
     const [userRows] = await db.query(
       `SELECT 
         id, phone, invite_code, 
-        total_balance, recharged_balance, withdrawable_balance
+        total_balance, today_income
       FROM users 
       WHERE id = ?`,
       [req.user.id]
     );
-    
+
     if (userRows.length === 0) {
       return res.status(404).json({ 
         success: false,
         msg: "User not found" 
       });
     }
-    
+
     const user = userRows[0];
-    
+
+    // Calculate total assets dynamically
+    const totalBalance = Number(user.total_balance) || 0;
+    const todayIncome = Number(user.today_income) || 0;
+    const totalAssets = totalBalance + todayIncome;
+
     const [bankRows] = await db.query(
       "SELECT bank_name, account_holder, account_number FROM bank_details WHERE user_id = ?",
       [req.user.id]
     );
-    
+
     res.status(200).json({
       success: true,
       user: {
         ...user,
+        total_assets: totalAssets, // override with calculated value
         bank: bankRows[0] || null
       }
     });

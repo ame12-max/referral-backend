@@ -23,18 +23,35 @@ app.use(express.json());
 
 // Routes
 const userRoutes = require("./routes/userRoutes");
-const paymentRoutes = require('./routes/paymentRoutes');
+const paymentRoutes = require('./routes/paymentRoutes'); // Adjust path as needed
 const productRoutes = require('./routes/productRoutes');
 const transactionsRoutes = require('./routes/transactions');
 const userStatsRouter = require('./routes/userStatus');
 const withdrawalsRoutes = require('./routes/withdrawals');
+const orderRoutes  = require('./routes/orderRoutes');
+
+
+
+app.use((req, res, next) => {
+  req.url = req.url.replace(/\/{2,}/g, '/');
+  next();
+});
+
+// Mount order routes
+app.use('/api/orders', orderRoutes);
+
+// Add this test route
+app.get('/api/test', (req, res) => {
+  res.json({ message: "Test route works!" });
+});
 
 app.use("/api/user", userRoutes);
-app.use('/api/payment', paymentRoutes);
+app.use('/api', paymentRoutes); // 👈 This makes routes accessible at /api/
 app.use('/api/products', productRoutes);
 app.use('/api/stats', userStatsRouter);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/withdrawals', withdrawalsRoutes);
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -44,6 +61,7 @@ app.use((err, req, res, next) => {
     message: err.message 
   });
 });
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
