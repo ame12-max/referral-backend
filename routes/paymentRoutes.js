@@ -105,9 +105,10 @@ router.patch('/update-payment', async (req, res) => {
     if (status === 'completed') {
       console.log('Creating order for completed payment');
       
-      // Get payment details
+      // Get payment details with product image
       const [paymentDetails] = await db.query(
         `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
+                COALESCE(pr.image, '/default-product.png') AS product_image, 
                 p.amount, pr.returns
          FROM payments p
          JOIN users u ON p.user_id = u.id
@@ -176,17 +177,18 @@ router.patch('/update-payment', async (req, res) => {
       const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
       console.log('Calculated daily profit:', dailyProfit);
 
-      // Create order
+      // Create order with product image
       const [orderResult] = await db.query(
         `INSERT INTO orders 
-        (user_id, user_phone, product_id, product_name, 
+        (user_id, user_phone, product_id, product_name, product_image,
          price, daily_profit, validity_days, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           payment.user_id,
           cleanPhone,
           payment.product_id,
           payment.product_name,
+          payment.product_image,
           payment.amount,
           dailyProfit,
           validityDays

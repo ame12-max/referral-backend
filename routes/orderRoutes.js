@@ -9,7 +9,9 @@ router.get('/user/:phone', async (req, res) => {
     const phone = req.params.phone.replace(/[{} ]/g, '');
     
     const [orders] = await db.query(
-      `SELECT id, product_name, status, price, 
+      `SELECT id, product_name, 
+              COALESCE(product_image, '/default-product.png') AS product_image,
+              status, price, 
               daily_profit, validity_days, total_profit, 
               profit_collected, created_at
        FROM orders 
