@@ -39,6 +39,7 @@ app.use('/api/test', (req, res) => res.json({ message: "Test route works!" }));
 
 app.use("/api/user", userRoutes);
 app.use('/api', paymentRoutes);
+app.use('/api/user', paymentRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/stats', userStatsRouter);
 app.use('/api/transactions', transactionsRoutes);

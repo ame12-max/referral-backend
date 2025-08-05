@@ -212,4 +212,37 @@ router.patch('/update-payment', async (req, res) => {
   }
 });
 
+// @route   POST /api/user/recharge
+// @desc    Handle direct recharge request
+// @access  Private (expects auth middleware if needed)
+router.post('/recharge', async (req, res) => {
+  try {
+    const { userId, amount, method, reference, transactionId } = req.body;
+
+    // ✅ Validate all dynamic fields
+    if (!userId || !amount || !method || !reference || !transactionId) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // ✅ Insert recharge with dynamic userId
+    const [result] = await db.query(
+      `INSERT INTO direct_payment 
+       (user_id, amount, method, reference, transaction_id, status, created_at) 
+       VALUES (?, ?, ?, ?, ?, 'pending', NOW())`,
+      [userId, amount, method, reference, transactionId]
+    );
+
+    res.status(201).json({ 
+      message: 'Recharge submitted successfully',
+      paymentId: result.insertId 
+    });
+
+  } catch (err) {
+    console.error('Recharge error:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+
+
 module.exports = router;
