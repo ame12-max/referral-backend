@@ -1,4 +1,4 @@
- const express = require("express");
+const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 
@@ -6,12 +6,21 @@ dotenv.config();
 const app = express();
 
 // ✅ Middleware
+const allowedOrigins = ['http://localhost:5174', 'http://localhost:5173'];
+
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
 }));
+
 
 // Add health check endpoint
 app.get('/api/health', (req, res) => {
@@ -33,6 +42,10 @@ const transactionsRoutes = require('./routes/transactions');
 const userStatsRouter = require('./routes/userStatus');
 const withdrawalsRoutes = require('./routes/withdrawals');
 const orderRoutes  = require('./routes/orderRoutes');
+
+// ✅ Admin routes (ADD THIS SECTION)
+const adminRoutes = require('./routes/admin');
+app.use('/api/admin', adminRoutes);
 
 app.use('/api/orders', orderRoutes);
 app.use('/api/test', (req, res) => res.json({ message: "Test route works!" }));

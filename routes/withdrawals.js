@@ -52,9 +52,9 @@ router.post('/', authenticateUser,  async (req, res) => {
 
     // Step 6: Insert withdrawal request
     await db.query(
-      "INSERT INTO withdrawals (user_id, amount, account_number, bank_name, fee) VALUES (?, ?, ?, ?, ?)",
-      [userId, amount, account_number, bank_name, withdrawalFee]
-    );
+  "INSERT INTO withdrawals (user_id, amount, account_number, bank_name, fee, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+  [userId, amount, account_number, bank_name, withdrawalFee]
+);
 
     // Step 7: Commit
     await db.query("COMMIT");
