@@ -217,7 +217,30 @@ router.patch('/recharges/:id/approve', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Reject recharge
+// PATCH /api/admin/recharges/:id/reject
+router.patch('/recharges/:id/reject', authenticateAdmin, async (req, res) => {
+  try {
+    const [recharge] = await db.query(
+      'SELECT * FROM direct_payment WHERE id = ? AND status = "pending"',
+      [req.params.id]
+    );
+
+    if (recharge.length === 0) {
+      return res.status(404).json({ error: 'Pending recharge not found' });
+    }
+
+    await db.query(
+      'UPDATE direct_payment SET status = "failed" WHERE id = ?',
+      [req.params.id]
+    );
+
+    res.json({ success: true, message: 'Recharge rejected' });
+  } catch (err) {
+    console.error('Error rejecting recharge:', err);
+    res.status(500).json({ error: 'Database error', details: err.message });
+  }
+});
+
 // Get pending payments
 router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
   const paymentId = req.params.id;
@@ -354,48 +377,6 @@ router.get('/payments/pending', authenticateAdmin, async (req, res) => {
 });
 
 
-// Get pending payments (FIXED)
-// Get pending payments (UPDATED with product_id)
-/* router.get('/payments/pending', authenticateAdmin, async (req, res) => {
-  try {
-    // 1. Check if payments table exists
-    const [tableCheck] = await db.query("SHOW TABLES LIKE 'payments'");
-    if (tableCheck.length === 0) {
-      return res.status(500).json({ 
-        error: 'Database error',
-        details: 'Payments table does not exist'
-      });
-    }
-
-    // 2. Get payments table structure
-    const [tableStructure] = await db.query("DESCRIBE payments");
-    console.log('Payments table structure:', tableStructure);
-
-    // 3. Test simple query
-    const [testQuery] = await db.query("SELECT * FROM payments LIMIT 1");
-    console.log('Test query result:', testQuery);
-
-    // 4. Execute the actual query
-    const [payments] = await db.query(`
-      SELECT p.id, p.amount, p.transaction_id, p.status, p.created_at,
-             u.name AS user_name, u.phone AS user_phone
-      FROM payments p
-      JOIN users u ON p.user_id = u.id
-      WHERE p.status = 'pending'
-    `);
-    
-    console.log('Fetched payments:', payments);
-    res.json(payments);
-  } catch (err) {
-    console.error('Error fetching pending payments:', err);
-    res.status(500).json({ 
-      error: 'Database error',
-      details: err.message,
-      sql: err.sql,
-      stack: err.stack
-    });
-  }
-}); */
 
 // Update payment status
 router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
@@ -413,5 +394,47 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
     res.status(500).json({ error: 'Database error', details: err.message });
   }
 });
+
+router.get('/orders', async (req, res) => {
+  const { status } = req.query;
+
+  try {
+    let query = 'SELECT * FROM orders';
+    const params = [];
+
+    if (status) {
+      query += ' WHERE status = ?';
+      params.push(status);
+    }
+
+    const [orders] = await db.query(query, params);
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
+// PATCH /api/admin/orders/:id/approve
+router.patch('/orders/:id/approve', async (req, res) => {
+  const orderId = req.params.id;
+
+  try {
+    // Update the order status to 'active'
+    const [result] = await db.query(
+      'UPDATE orders SET status = ? WHERE id = ? AND status = "pending"',
+      ['active', orderId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Order not found or already approved' });
+    }
+
+    res.json({ success: true, message: `Order ${orderId} approved` });
+  } catch (err) {
+    console.error('Error approving order:', err);
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
+});
+
 
 module.exports = router;
