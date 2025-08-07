@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const cron = require('node-cron');
 
 dotenv.config();
 const app = express();
@@ -42,6 +43,31 @@ const transactionsRoutes = require('./routes/transactions');
 const userStatsRouter = require('./routes/userStatus');
 const withdrawalsRoutes = require('./routes/withdrawals');
 const orderRoutes  = require('./routes/orderRoutes');
+const applyDailyProfits = require('./routes/dailyProfitJob');
+const supabase = require('./config/supabaseClient');
+app.post('/users', async (req, res) => {
+  const { email, referral_code, referred_by } = req.body;
+
+  const { data, error } = await supabase
+    .from('users')
+    .insert([{ email, referral_code, referred_by }]);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
+// ✅ Get all users
+app.get('/users', async (req, res) => {
+  const { data, error } = await supabase.from('users').select('*');
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
+
+cron.schedule('10 0 * * *', async () => {
+  console.log('⏰ Running daily profit job...');
+  await applyDailyProfits();
+});
 
 // ✅ Admin routes (ADD THIS SECTION)
 const adminRoutes = require('./routes/admin');
@@ -58,6 +84,9 @@ app.use('/api/stats', userStatsRouter);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/withdrawals', withdrawalsRoutes);
 
+app.get('/test',(req,res) =>{
+  res.send('server is working')
+})
 // ✅ Error handling
 app.use((err, req, res, next) => {
   console.error(err.stack);
