@@ -7,7 +7,7 @@ dotenv.config();
 const app = express();
 
 // ✅ Middleware
-const allowedOrigins = ['http://localhost:5174', 'http://localhost:5173'];
+const allowedOrigins = ['http://localhost:5174', 'http://localhost:5173','https://referral-backend-ui9q.onrender.com','https://referal-admin.vercel.app/login'];
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -44,25 +44,6 @@ const userStatsRouter = require('./routes/userStatus');
 const withdrawalsRoutes = require('./routes/withdrawals');
 const orderRoutes  = require('./routes/orderRoutes');
 const applyDailyProfits = require('./routes/dailyProfitJob');
-const supabase = require('./config/supabaseClient');
-app.post('/users', async (req, res) => {
-  const { email, referral_code, referred_by } = req.body;
-
-  const { data, error } = await supabase
-    .from('users')
-    .insert([{ email, referral_code, referred_by }]);
-
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
-});
-
-// ✅ Get all users
-app.get('/users', async (req, res) => {
-  const { data, error } = await supabase.from('users').select('*');
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
-});
-
 
 cron.schedule('10 0 * * *', async () => {
   console.log('⏰ Running daily profit job...');
