@@ -299,9 +299,10 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
       const returns = payment.returns.toLowerCase();
       let dailyProfitPercent, validityDays;
 
-      const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
-      const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
-      const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
+      const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hours?/i);
+      const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days?/i);
+      const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days?/i);
+
 
       if (newFormatMatch) {
         dailyProfitPercent = parseFloat(newFormatMatch[1]);
