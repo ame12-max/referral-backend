@@ -292,35 +292,38 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
         });
       }
 
-      const payment = paymentDetails[0];
-      const cleanPhone = payment.phone.replace(/[{} ]/g, '');
+     const payment = paymentDetails[0];
+const cleanPhone = payment.phone.replace(/[{} ]/g, '');
 
-      // Parse returns string
-      const returns = payment.returns.toLowerCase();
-      let dailyProfitPercent, validityDays;
+// Parse returns string
+const returns = payment.returns.toLowerCase();
+let dailyProfitPercent, validityDays;
 
-      const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hours?/i);
-      const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days?/i);
-      const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days?/i);
+const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
+const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
+const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
+const monthlyFormatMatch = returns.match(/(\d+)%\s*monthly/);
 
+if (newFormatMatch) {
+  dailyProfitPercent = parseFloat(newFormatMatch[1]);
+  const hours = parseInt(newFormatMatch[2]);
+  validityDays = hours / 24;
+} else if (oldFormatMatch) {
+  dailyProfitPercent = parseFloat(oldFormatMatch[1]);
+  validityDays = parseInt(oldFormatMatch[2]);
+} else if (simpleFormatMatch) {
+  dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
+  validityDays = parseInt(simpleFormatMatch[2]);
+} else if (monthlyFormatMatch) {
+  dailyProfitPercent = parseFloat(monthlyFormatMatch[1]);
+  validityDays = 30; // Assume 1 month = 30 days
+} else {
+  return res.status(400).json({
+    error: 'Invalid returns format',
+  });
+}
 
-      if (newFormatMatch) {
-        dailyProfitPercent = parseFloat(newFormatMatch[1]);
-        const hours = parseInt(newFormatMatch[2]);
-        validityDays = hours / 24;
-      } else if (oldFormatMatch) {
-        dailyProfitPercent = parseFloat(oldFormatMatch[1]);
-        validityDays = parseInt(oldFormatMatch[2]);
-      } else if (simpleFormatMatch) {
-        dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
-        validityDays = parseInt(simpleFormatMatch[2]);
-      } else {
-        return res.status(400).json({
-          error: 'Invalid returns format',
-        });
-      }
-
-      const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
+const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
 
       const [orderResult] = await db.query(
         `INSERT INTO orders 
