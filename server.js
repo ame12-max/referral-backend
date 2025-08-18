@@ -7,7 +7,7 @@ dotenv.config();
 const app = express();
 
 // ✅ Middleware
-const allowedOrigins = ['http://localhost:5174', 'http://localhost:5173','https://referral-backend-ui9q.onrender.com','https://referal-admin.vercel.app'];
+const allowedOrigins = ['http://localhost:5174', 'http://localhost:5173','https://referral-backend-ui9q.onrender.com','https://referal-admin.vercel.app','https://orium-nine.vercel.app'];
 
 app.use(cors({
   origin: function (origin, callback) {
