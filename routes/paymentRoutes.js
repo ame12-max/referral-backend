@@ -46,7 +46,6 @@ router.post('/submit-payment', async (req, res) => {
 router.patch('/update-payment', async (req, res) => {
   console.log('Update payment request received:', req.body);
 
-  // Validate request exists
   if (!req.body || Object.keys(req.body).length === 0) {
     return res.status(400).json({ 
       error: 'Request body is empty',
@@ -56,7 +55,6 @@ router.patch('/update-payment', async (req, res) => {
 
   const { paymentId, status } = req.body;
 
-  // Validate paymentId
   if (paymentId === undefined || paymentId === null || isNaN(paymentId)) {
     return res.status(400).json({ 
       error: 'Valid paymentId is required',
@@ -64,17 +62,8 @@ router.patch('/update-payment', async (req, res) => {
     });
   }
 
-  // Validate status
-  if (!status) {
-    return res.status(400).json({ 
-      error: 'status is required',
-      validStatuses: ['pending', 'completed', 'failed']
-    });
-  }
-
-  // Validate status value
   const validStatuses = ['pending', 'completed', 'failed'];
-  if (!validStatuses.includes(status)) {
+  if (!status || !validStatuses.includes(status)) {
     return res.status(400).json({ 
       error: 'Invalid status value',
       validStatuses,
@@ -91,25 +80,20 @@ router.patch('/update-payment', async (req, res) => {
       [status, paymentId]
     );
 
-    // Check if payment was found
     if (updateResult.affectedRows === 0) {
-      console.warn(`Payment not found: ${paymentId}`);
-      return res.status(404).json({ 
-        error: `Payment with ID ${paymentId} not found`
-      });
+      return res.status(404).json({ error: `Payment with ID ${paymentId} not found` });
     }
-
-    console.log(`Payment ${paymentId} updated to ${status}`);
 
     // 2. Only create order for completed payments
     if (status === 'completed') {
       console.log('Creating order for completed payment');
       
-      // Get payment details with product image
+      // Fetch payment + product details with real investment plan values
       const [paymentDetails] = await db.query(
-        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
+        `SELECT p.user_id, u.phone, p.product_id, 
+                pr.name AS product_name, 
                 COALESCE(pr.image, '/default-product.png') AS product_image, 
-                p.amount, pr.returns
+                p.amount, pr.profit_rate, pr.validity_days
          FROM payments p
          JOIN users u ON p.user_id = u.id
          JOIN products pr ON p.product_id = pr.id
@@ -118,71 +102,23 @@ router.patch('/update-payment', async (req, res) => {
       );
 
       if (paymentDetails.length === 0) {
-        console.error(`Payment details not found for ID: ${paymentId}`);
-        return res.status(500).json({
-          error: 'Payment details not found after update',
-          paymentId
-        });
+        return res.status(500).json({ error: 'Payment details not found', paymentId });
       }
 
       const payment = paymentDetails[0];
-      console.log('Payment details:', payment);
 
-      // Clean phone number
+      // Clean phone
       const cleanPhone = payment.phone.replace(/[{} ]/g, '');
-      console.log('Cleaned phone:', cleanPhone);
-
-      // Parse returns string with multiple format support
-      const returns = payment.returns.toLowerCase();
-      let dailyProfitPercent, validityDays;
-
-      // Try to match "X% profit / Yhr" format (e.g. "18% profit / 24hr")
-      const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
-      
-      // Try to match "X% daily for Y days" format (e.g. "5% daily for 30 days")
-      const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
-      
-      // Try to match "X% for Y days" format (fallback)
-      const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
-
-      if (newFormatMatch) {
-        // Format: "X% profit / Y hr"
-        dailyProfitPercent = parseFloat(newFormatMatch[1]);
-        const hours = parseInt(newFormatMatch[2]);
-        validityDays = hours / 24;  // Convert hours to days
-      } else if (oldFormatMatch) {
-        // Format: "X% daily for Y days"
-        dailyProfitPercent = parseFloat(oldFormatMatch[1]);
-        validityDays = parseInt(oldFormatMatch[2]);
-      } else if (simpleFormatMatch) {
-        // Format: "X% for Y days"
-        dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
-        validityDays = parseInt(simpleFormatMatch[2]);
-      } else {
-        console.error('Invalid returns format:', payment.returns);
-        return res.status(400).json({
-          error: 'Invalid returns format',
-          expectedFormats: [
-            'X% profit / Yhr (e.g., 18% profit / 24hr)',
-            'X% daily for Y days (e.g., 5% daily for 30 days)',
-            'X% for Y days (e.g., 10% for 7 days)'
-          ],
-          received: payment.returns
-        });
-      }
-
-      console.log('Parsed returns:', { dailyProfitPercent, validityDays });
 
       // Calculate daily profit
-      const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
-      console.log('Calculated daily profit:', dailyProfit);
+      const dailyProfit = (payment.amount * payment.profit_rate) / 100;
 
-      // Create order with product image
+      // Insert order
       const [orderResult] = await db.query(
         `INSERT INTO orders 
-        (user_id, user_phone, product_id, product_name, product_image,
-         price, daily_profit, validity_days, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         (user_id, user_phone, product_id, product_name, product_image,
+          price, daily_profit, validity_days, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           payment.user_id,
           cleanPhone,
@@ -191,7 +127,7 @@ router.patch('/update-payment', async (req, res) => {
           payment.product_image,
           payment.amount,
           dailyProfit,
-          validityDays
+          payment.validity_days
         ]
       );
 
@@ -205,10 +141,7 @@ router.patch('/update-payment', async (req, res) => {
     });
   } catch (err) {
     console.error('Payment update failed:', err);
-    res.status(500).json({ 
-      error: 'Server error',
-      details: err.message
-    });
+    res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
