@@ -111,25 +111,28 @@ router.patch('/update-payment', async (req, res) => {
       const cleanPhone = payment.phone.replace(/[{} ]/g, '');
 
       // Calculate daily profit
-      const dailyProfit = (payment.amount * payment.profit_rate) / 100;
+     // Create order with product image and investment plan
+const dailyProfit = (payment.amount * payment.profit_rate) / 100;
+const validityDays = payment.validity_days;  // from products table
+const totalProfit = dailyProfit * validityDays;
 
-      // Insert order
-      const [orderResult] = await db.query(
-        `INSERT INTO orders 
-         (user_id, user_phone, product_id, product_name, product_image,
-          price, daily_profit, validity_days, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        [
-          payment.user_id,
-          cleanPhone,
-          payment.product_id,
-          payment.product_name,
-          payment.product_image,
-          payment.amount,
-          dailyProfit,
-          payment.validity_days
-        ]
-      );
+const [orderResult] = await db.query(
+  `INSERT INTO orders 
+   (user_id, user_phone, product_id, product_name, product_image,
+    price, daily_profit, validity_days, total_profit, status)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+  [
+    payment.user_id,
+    cleanPhone,
+    payment.product_id,
+    payment.product_name,
+    payment.product_image,
+    payment.amount,
+    dailyProfit,
+    validityDays,
+    totalProfit
+  ]
+);
 
       console.log(`Order created with ID: ${orderResult.insertId}`);
     }
