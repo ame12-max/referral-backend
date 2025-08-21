@@ -9,7 +9,7 @@ async function applyDailyProfits() {
              o.total_profit, o.created_at, o.profit_collected, 
              o.last_profit_at
       FROM orders o
-      WHERE o.status = 'completed' 
+      WHERE o.status = 'active' 
         AND o.profit_collected = 0
     `);
 
