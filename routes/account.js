@@ -14,7 +14,7 @@ router.get('/user/:id/account', async (req, res) => {
 
     // Get user balance and points
     const [userData] = await db.query(
-      'SELECT balance, points FROM users WHERE id = ?',
+      'SELECT balance, points, total_assets FROM users WHERE id = ?',
       [userId]
     );
 
@@ -42,16 +42,8 @@ router.get('/user/:id/account', async (req, res) => {
       [userId]
     );
 
-    // Get investments (assets)
-    const [investments] = await db.query(
-      'SELECT
-  COALESCE(SUM(CASE WHEN type IN ('deposit', 'interest') AND status = 'active' THEN amount ELSE 0 END), 0)
-  AS total_assets
-FROM transactions
-WHERE user_id = ?
-',
-      [userId]
-    );
+    // Use total_assets directly from users table (cumulative, not affected by withdrawals)
+    const totalAssets = userData[0].total_assets || 0;
 
     res.json({
       total_balance: userData[0].balance || 0,
@@ -60,7 +52,7 @@ WHERE user_id = ?
       today_income: transactions[0].today_income || 0,
       team_income: teamEarnings[0].team_income || 0,
       total_income: transactions[0].total_income || 0,
-      total_assets: investments[0].total_assets || 0,
+      total_assets: totalAssets,
       total_recharge: transactions[0].total_recharge || 0,
       total_withdraw: transactions[0].total_withdraw || 0
     });
