@@ -45,10 +45,11 @@ const withdrawalsRoutes = require('./routes/withdrawals');
 const orderRoutes  = require('./routes/orderRoutes');
 const applyDailyProfits = require('./routes/dailyProfitJob');
 
-cron.schedule('10 0 * * *', async () => {
+cron.schedule('* * * * *', async () => {
   console.log('⏰ Running daily profit job...');
   await applyDailyProfits();
 });
+
 
 // ✅ Admin routes (ADD THIS SECTION)
 const adminRoutes = require('./routes/admin');
