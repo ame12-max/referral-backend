@@ -45,7 +45,7 @@ const withdrawalsRoutes = require('./routes/withdrawals');
 const orderRoutes  = require('./routes/orderRoutes');
 const applyDailyProfits = require('./routes/dailyProfitJob');
 
-cron.schedule('* * * * *', async () => {
+cron.schedule('10 0 * * *', async () => {
   console.log('⏰ Running daily profit job...');
   await applyDailyProfits();
 });
