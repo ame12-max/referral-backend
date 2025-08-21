@@ -7,7 +7,7 @@ async function applyDailyProfits() {
     const [orders] = await db.query(`
       SELECT o.id, o.user_id, o.daily_profit, o.validity_days,
              o.total_profit, o.created_at, o.profit_collected, 
-             o.last_profit_at, u.balance
+             o.last_profit_at, u.total_balance
       FROM orders o
       JOIN users u ON o.user_id = u.id
       WHERE o.status = 'completed' 
@@ -32,7 +32,7 @@ async function applyDailyProfits() {
 
           // 3. Update user balance
           await db.query(
-            `UPDATE users SET balance = balance + ? WHERE id = ?`,
+            `UPDATE users SET total_balance = total_balance + ? WHERE id = ?`,
             [payoutAmount, order.user_id]
           );
 
