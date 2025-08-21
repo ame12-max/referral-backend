@@ -44,7 +44,12 @@ router.get('/user/:id/account', async (req, res) => {
 
     // Get investments (assets)
     const [investments] = await db.query(
-      'SELECT COALESCE(SUM(amount), 0) AS total_assets FROM investments WHERE user_id = ?',
+      'SELECT
+  COALESCE(SUM(CASE WHEN type IN ('deposit', 'interest') AND status = 'active' THEN amount ELSE 0 END), 0)
+  AS total_assets
+FROM transactions
+WHERE user_id = ?
+',
       [userId]
     );
 
