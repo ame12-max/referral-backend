@@ -31,11 +31,12 @@ async function applyDailyProfits() {
 
         // 2. Update only today_income for the user
         await db.query(
-          `UPDATE users 
-           SET today_income = today_income + ? 
-           WHERE id = ?`,
-          [payoutAmount, order.user_id]
-        );
+  `UPDATE users 
+   SET today_income = today_income + ?, 
+       total_balance = total_balance + ?
+   WHERE id = ?`,
+  [payoutAmount, payoutAmount, order.user_id]
+);
 
         // 3. Update last_profit_at
         await db.query(
