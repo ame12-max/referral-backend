@@ -243,127 +243,127 @@ router.patch('/recharges/:id/reject', authenticateAdmin, async (req, res) => {
 
 // Get pending payments
 router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
-  const paymentId = req.params.id;
-  const { status } = req.body;
+  const paymentId = req.params.id;
+  const { status } = req.body;
 
-  if (!status) {
-    return res.status(400).json({
-      error: 'Status is required',
-    });
-  }
+  if (!status) {
+    return res.status(400).json({
+      error: 'Status is required',
+    });
+  }
 
-  const validStatuses = ['pending', 'completed', 'failed'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({
-      error: 'Invalid status value',
-      validStatuses,
-    });
-  }
+  const validStatuses = ['pending', 'completed', 'failed'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({
+      error: 'Invalid status value',
+      validStatuses,
+    });
+  }
 
-  try {
-    // 1. Update payment status
-    const [updateResult] = await db.query(
-      'UPDATE payments SET status = ? WHERE id = ?',
-      [status, paymentId]
-    );
+  try {
+    // 1. Update payment status
+    const [updateResult] = await db.query(
+      'UPDATE payments SET status = ? WHERE id = ?',
+      [status, paymentId]
+    );
 
-    if (updateResult.affectedRows === 0) {
-      return res.status(404).json({
-        error: `Payment with ID ${paymentId} not found`,
-      });
-    }
+    if (updateResult.affectedRows === 0) {
+      return res.status(404).json({
+        error: `Payment with ID ${paymentId} not found`,
+      });
+    }
 
-    // 2. If status is 'completed', insert into orders table
-    if (status === 'completed') {
-      const [paymentDetails] = await db.query(
-        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
-                COALESCE(pr.image, '/default-product.png') AS product_image, 
-                p.amount, pr.returns
-         FROM payments p
-         JOIN users u ON p.user_id = u.id
-         JOIN products pr ON p.product_id = pr.id
-         WHERE p.id = ?`,
-        [paymentId]
-      );
+    // 2. If status is 'completed', insert into orders table
+    if (status === 'completed') {
+      const [paymentDetails] = await db.query(
+        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
+                COALESCE(pr.image, '/default-product.png') AS product_image, 
+                p.amount, pr.returns, pr.validity_days
+         FROM payments p
+         JOIN users u ON p.user_id = u.id
+         JOIN products pr ON p.product_id = pr.id
+         WHERE p.id = ?`,
+        [paymentId]
+      );
 
-      if (paymentDetails.length === 0) {
-        return res.status(500).json({
-          error: 'Payment details not found',
-        });
-      }
+      if (paymentDetails.length === 0) {
+        return res.status(500).json({
+          error: 'Payment details not found',
+        });
+      }
 
-     const payment = paymentDetails[0];
-const cleanPhone = payment.phone.replace(/[{} ]/g, '');
+      const payment = paymentDetails[0];
+      const cleanPhone = payment.phone.replace(/[{} ]/g, '');
 
-// Parse returns string
-const returns = payment.returns.toLowerCase();
-let dailyProfitPercent, validityDays;
+      // Parse returns string to get daily profit percent
+      const returns = payment.returns.toLowerCase();
+      let dailyProfitPercent;
 
-const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
-const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
-const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
-const monthlyFormatMatch = returns.match(/(\d+)%\s*monthly/);
+      const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
+      const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
+      const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
+      const monthlyFormatMatch = returns.match(/(\d+)%\s*monthly/);
 
-if (newFormatMatch) {
-  dailyProfitPercent = parseFloat(newFormatMatch[1]);
-  const hours = parseInt(newFormatMatch[2]);
-  validityDays = hours / 24;
-} else if (oldFormatMatch) {
-  dailyProfitPercent = parseFloat(oldFormatMatch[1]);
-  validityDays = parseInt(oldFormatMatch[2]);
-} else if (simpleFormatMatch) {
-  dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
-  validityDays = parseInt(simpleFormatMatch[2]);
-} else if (monthlyFormatMatch) {
-  dailyProfitPercent = parseFloat(monthlyFormatMatch[1]);
-  validityDays = 30; // Assume 1 month = 30 days
-} else {
-  return res.status(400).json({
-    error: 'Invalid returns format',
-  });
-}
+      if (newFormatMatch) {
+        dailyProfitPercent = parseFloat(newFormatMatch[1]);
+      } else if (oldFormatMatch) {
+        dailyProfitPercent = parseFloat(oldFormatMatch[1]);
+      } else if (simpleFormatMatch) {
+        dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
+      } else if (monthlyFormatMatch) {
+        dailyProfitPercent = parseFloat(monthlyFormatMatch[1]);
+      } else {
+        return res.status(400).json({
+          error: 'Invalid returns format',
+        });
+      }
 
-const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
+      const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
+      
+      // Calculate the validity date
+      const validityDays = payment.validity_days;
+      const validityDate = new Date();
+      validityDate.setDate(validityDate.getDate() + validityDays);
 
-      const [orderResult] = await db.query(
-        `INSERT INTO orders 
-         (user_id, user_phone, product_id, product_name, product_image,
-          price, daily_profit, validity_days, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        [
-          payment.user_id,
-          cleanPhone,
-          payment.product_id,
-          payment.product_name,
-          payment.product_image,
-          payment.amount,
-          dailyProfit,
-          validityDays
-        ]
-      );
+      const [orderResult] = await db.query(
+        `INSERT INTO orders 
+         (user_id, user_phone, product_id, product_name, product_image,
+          price, daily_profit, validity_days, validity_date, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          payment.user_id,
+          cleanPhone,
+          payment.product_id,
+          payment.product_name,
+          payment.product_image,
+          payment.amount,
+          dailyProfit,
+          validityDays,
+          validityDate // The new calculated date
+        ]
+      );
 
-      return res.json({
-        success: true,
-        message: `Payment ${paymentId} marked as completed`,
-        orderCreated: true,
-        orderId: orderResult.insertId
-      });
-    }
+      return res.json({
+        success: true,
+        message: `Payment ${paymentId} marked as completed`,
+        orderCreated: true,
+        orderId: orderResult.insertId
+      });
+    }
 
-    res.json({
-      success: true,
-      message: `Payment ${paymentId} updated to ${status}`,
-    });
+    res.json({
+      success: true,
+      message: `Payment ${paymentId} updated to ${status}`,
+    });
 
-  } catch (err) {
-    console.error('Error updating payment and creating order:', err);
-    res.status(500).json({
-      error: 'Server error',
-      details: err.message,
-    });
-  }
+  } catch (err) {
+    console.error('Error updating payment and creating order:', err);
+    res.status(500).json({
+      error: 'Server error',
+      details: err.message,
+    });
+  }
 });
-
 router.get('/payments/pending', authenticateAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(`
