@@ -242,7 +242,6 @@ router.patch('/recharges/:id/reject', authenticateAdmin, async (req, res) => {
 });
 
 // Get pending payments
-// Get pending payments
 router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
   const paymentId = req.params.id;
   const { status } = req.body;
@@ -300,27 +299,30 @@ if (status === 'completed') {
             error: 'Payment details not found',
         });
     }
+  
+      const payment = paymentDetails[0];
+      const cleanPhone = payment.phone.replace(/[{} ]/g, '')
+  
+        // Calculate daily profit
+        const returns = payment.returns.toLowerCase();
+        let dailyProfitPercent;
+        const match = returns.match(/(\d+)%/);
+        if (match) {
+          dailyProfitPercent = parseFloat(match[1]);
+        } else {
+          return res.status(400).json({ error: 'Invalid returns format' });
+        }
+        const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
+  
+        // Calculate the validity date
+const validityDays = payment.validity_days;
+const validityDate = new Date();
+validityDate.setDate(validityDate.getDate() + validityDays);
 
-    const payment = paymentDetails[0];
-    const cleanPhone = payment.phone.replace(/[{} ]/g, '')
+// Format into MySQL DATETIME (YYYY-MM-DD HH:MM:SS)
+const validityDateStr = validityDate.toISOString().slice(0, 19).replace('T', ' ');
 
-      // Calculate daily profit
-      const returns = payment.returns.toLowerCase();
-      let dailyProfitPercent;
-      const match = returns.match(/(\d+)%/);
-      if (match) {
-        dailyProfitPercent = parseFloat(match[1]);
-      } else {
-        return res.status(400).json({ error: 'Invalid returns format' });
-      }
-      const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
-
-      // Calculate the validity date
-      const validityDays = payment.validity_days;
-      const validityDate = new Date();
-      validityDate.setDate(validityDate.getDate() + validityDays);
-
-      const [orderResult] = await db.query(
+const [orderResult] = await db.query(
   `INSERT INTO orders 
    (user_id, user_phone, product_id, product_name, product_image,
     price, daily_profit, validity_days, validity_date, status)
@@ -331,12 +333,13 @@ if (status === 'completed') {
     payment.product_id,
     payment.product_name,
     payment.product_image,
-    payment.amount,
+    Number(payment.amount),   // force numeric
     dailyProfit,
     validityDays,
-    validityDate
+    validityDateStr           // safe DATETIME format
   ]
 );
+
       return res.json({
         success: true,
         message: `Payment ${paymentId} marked as completed`,
