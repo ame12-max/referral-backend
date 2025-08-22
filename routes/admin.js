@@ -278,7 +278,7 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
     if (status === 'completed') {
       const [paymentDetails] = await db.query(
         `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
-                COALESCE(pr.image, '/default-product.png') AS product_image, 
+                ' COALESCE(pr.image, "/default-product.png") AS product_image, \n', 
                 p.amount, pr.returns, pr.validity_days
          FROM payments p
          JOIN users u ON p.user_id = u.id
