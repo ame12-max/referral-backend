@@ -276,15 +276,25 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
 
     // 2. If status is 'completed', insert into orders table
     if (status === 'completed') {
+
       const [paymentDetails] = await db.query(
-        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
-                ' COALESCE(pr.image, "/default-product.png") AS product_image, \n', 
-                p.amount, pr.returns, pr.validity_days
+
+        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
+
+                COALESCE(pr.image, '/default-product.png') AS product_image, 
+
+                p.amount, pr.returns
+
          FROM payments p
+
          JOIN users u ON p.user_id = u.id
+
          JOIN products pr ON p.product_id = pr.id
+
          WHERE p.id = ?`,
+
         [paymentId]
+
       );
 
       if (paymentDetails.length === 0) {
