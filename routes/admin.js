@@ -321,23 +321,22 @@ if (status === 'completed') {
       validityDate.setDate(validityDate.getDate() + validityDays);
 
       const [orderResult] = await db.query(
-        `INSERT INTO orders 
-         (user_id, user_phone, product_id, product_name, product_image,
-          price, daily_profit, validity_days, validity_date, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        [
-          payment.user_id,
-          cleanPhone,
-          payment.product_id,
-          payment.product_name,
-          payment.product_image,
-          payment.amount,
-          dailyProfit,
-          validityDays,
-          validityDate
-        ]
-      );
-
+  `INSERT INTO orders 
+   (user_id, user_phone, product_id, product_name, product_image,
+    price, daily_profit, validity_days, validity_date, status)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+  [
+    payment.user_id,
+    cleanPhone,
+    payment.product_id,
+    payment.product_name,
+    payment.product_image,
+    payment.amount,
+    dailyProfit,
+    validityDays,
+    validityDate
+  ]
+);
       return res.json({
         success: true,
         message: `Payment ${paymentId} marked as completed`,
