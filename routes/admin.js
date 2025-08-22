@@ -242,6 +242,7 @@ router.patch('/recharges/:id/reject', authenticateAdmin, async (req, res) => {
 });
 
 // Get pending payments
+// Get pending payments
 router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
   const paymentId = req.params.id;
   const { status } = req.body;
@@ -295,31 +296,17 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
       const payment = paymentDetails[0];
       const cleanPhone = payment.phone.replace(/[{} ]/g, '');
 
-      // Parse returns string to get daily profit percent
+      // Calculate daily profit
       const returns = payment.returns.toLowerCase();
       let dailyProfitPercent;
-
-      const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
-      const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
-      const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
-      const monthlyFormatMatch = returns.match(/(\d+)%\s*monthly/);
-
-      if (newFormatMatch) {
-        dailyProfitPercent = parseFloat(newFormatMatch[1]);
-      } else if (oldFormatMatch) {
-        dailyProfitPercent = parseFloat(oldFormatMatch[1]);
-      } else if (simpleFormatMatch) {
-        dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
-      } else if (monthlyFormatMatch) {
-        dailyProfitPercent = parseFloat(monthlyFormatMatch[1]);
+      const match = returns.match(/(\d+)%/);
+      if (match) {
+        dailyProfitPercent = parseFloat(match[1]);
       } else {
-        return res.status(400).json({
-          error: 'Invalid returns format',
-        });
+        return res.status(400).json({ error: 'Invalid returns format' });
       }
-
       const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
-      
+
       // Calculate the validity date
       const validityDays = payment.validity_days;
       const validityDate = new Date();
@@ -339,7 +326,7 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
           payment.amount,
           dailyProfit,
           validityDays,
-          validityDate // The new calculated date
+          validityDate
         ]
       );
 
