@@ -275,36 +275,34 @@ router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
     }
 
     // 2. If status is 'completed', insert into orders table
-    if (status === 'completed') {
+    
 
-      const [paymentDetails] = await db.query(
+if (status === 'completed') {
+    const [paymentDetails] = await db.query(
+      `SELECT
+        p.user_id,
+        u.phone,
+        p.product_id,
+        pr.name AS product_name,
+        COALESCE(pr.image, '/default-product.png') AS product_image,
+        p.amount,
+        pr.returns,
+        pr.validity_days
+      FROM payments p
+      JOIN users u ON p.user_id = u.id
+      JOIN products pr ON p.product_id = pr.id
+      WHERE p.id = ?`,
+      [paymentId]
+    );
 
-        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
+    if (paymentDetails.length === 0) {
+        return res.status(500).json({
+            error: 'Payment details not found',
+        });
+    }
 
-                COALESCE(pr.image, '/default-product.png') AS product_image, 
-
-                p.amount, pr.returns
-
-         FROM payments p
-
-         JOIN users u ON p.user_id = u.id
-
-         JOIN products pr ON p.product_id = pr.id
-
-         WHERE p.id = ?`,
-
-        [paymentId]
-
-      );
-
-      if (paymentDetails.length === 0) {
-        return res.status(500).json({
-          error: 'Payment details not found',
-        });
-      }
-
-      const payment = paymentDetails[0];
-      const cleanPhone = payment.phone.replace(/[{} ]/g, '');
+    const payment = paymentDetails[0];
+    const cleanPhone = payment.phone.replace(/[{} ]/g, '')
 
       // Calculate daily profit
       const returns = payment.returns.toLowerCase();
