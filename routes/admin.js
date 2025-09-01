@@ -243,124 +243,127 @@ router.patch('/recharges/:id/reject', authenticateAdmin, async (req, res) => {
 
 // Get pending payments
 router.patch('/payments/:id', authenticateAdmin, async (req, res) => {
-  const paymentId = req.params.id;
-  const { status } = req.body;
+  const paymentId = req.params.id;
+  const { status } = req.body;
 
-  if (!status) {
-    return res.status(400).json({
-      error: 'Status is required',
-    });
-  }
+  if (!status) {
+    return res.status(400).json({
+      error: 'Status is required',
+    });
+  }
 
-  const validStatuses = ['pending', 'completed', 'failed'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({
-      error: 'Invalid status value',
-      validStatuses,
-    });
-  }
+  const validStatuses = ['pending', 'completed', 'failed'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({
+      error: 'Invalid status value',
+      validStatuses,
+    });
+  }
 
-  try {
-    // 1. Update payment status
-    const [updateResult] = await db.query(
-      'UPDATE payments SET status = ? WHERE id = ?',
-      [status, paymentId]
-    );
-
-    if (updateResult.affectedRows === 0) {
-      return res.status(404).json({
-        error: `Payment with ID ${paymentId} not found`,
-      });
-    }
-
-    // 2. If status is 'completed', insert into orders table
-    
-
-if (status === 'completed') {
-    const [paymentDetails] = await db.query(
-      `SELECT
-        p.user_id,
-        u.phone,
-        p.product_id,
-        pr.name AS product_name,
-        COALESCE(pr.image, '/default-product.png') AS product_image,
-        p.amount,
-        pr.returns,
-        pr.validity_days
-      FROM payments p
-      JOIN users u ON p.user_id = u.id
-      JOIN products pr ON p.product_id = pr.id
-      WHERE p.id = ?`,
-      [paymentId]
+  try {
+    // 1. Update payment status
+    const [updateResult] = await db.query(
+      'UPDATE payments SET status = ? WHERE id = ?',
+      [status, paymentId]
     );
 
-    if (paymentDetails.length === 0) {
-        return res.status(500).json({
-            error: 'Payment details not found',
-        });
+    if (updateResult.affectedRows === 0) {
+      return res.status(404).json({
+        error: `Payment with ID ${paymentId} not found`,
+      });
     }
-  
-      const payment = paymentDetails[0];
-      const cleanPhone = payment.phone.replace(/[{} ]/g, '')
-  
-        // Calculate daily profit
-        const returns = payment.returns.toLowerCase();
-        let dailyProfitPercent;
-        const match = returns.match(/(\d+)%/);
-        if (match) {
-          dailyProfitPercent = parseFloat(match[1]);
-        } else {
-          return res.status(400).json({ error: 'Invalid returns format' });
-        }
-        const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
-  
-        // Calculate the validity date
-const validityDays = payment.validity_days;
-const validityDate = new Date();
-validityDate.setDate(validityDate.getDate() + validityDays);
 
-// Format into MySQL DATETIME (YYYY-MM-DD HH:MM:SS)
-const validityDateStr = validityDate.toISOString().slice(0, 19).replace('T', ' ');
+    // 2. If status is 'completed', insert into orders table
+    if (status === 'completed') {
+      const [paymentDetails] = await db.query(
+        `SELECT p.user_id, u.phone, p.product_id, pr.name AS product_name, 
+                COALESCE(pr.image, '/default-product.png') AS product_image, 
+                p.amount, pr.returns
+         FROM payments p
+         JOIN users u ON p.user_id = u.id
+         JOIN products pr ON p.product_id = pr.id
+         WHERE p.id = ?`,
+        [paymentId]
+      );
 
-const [orderResult] = await db.query(
-  `INSERT INTO orders 
-   (user_id, user_phone, product_id, product_name, product_image,
-    price, daily_profit, validity_days, validity_date, status)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-  [
-    payment.user_id,
-    cleanPhone,
-    payment.product_id,
-    payment.product_name,
-    payment.product_image,
-    Number(payment.amount),   // force numeric
-    dailyProfit,
-    validityDays,
-    validityDateStr           // safe DATETIME format
-  ]
-);
+      if (paymentDetails.length === 0) {
+        return res.status(500).json({
+          error: 'Payment details not found',
+        });
+      }
 
-      return res.json({
-        success: true,
-        message: `Payment ${paymentId} marked as completed`,
-        orderCreated: true,
-        orderId: orderResult.insertId
-      });
-    }
+     const payment = paymentDetails[0];
+const cleanPhone = payment.phone.replace(/[{} ]/g, '');
 
-    res.json({
-      success: true,
-      message: `Payment ${paymentId} updated to ${status}`,
-    });
+// Parse returns string
+const returns = payment.returns.toLowerCase();
+let dailyProfitPercent, validityDays;
 
-  } catch (err) {
-    console.error('Error updating payment and creating order:', err);
-    res.status(500).json({
-      error: 'Server error',
-      details: err.message,
-    });
-  }
+const newFormatMatch = returns.match(/(\d+)%\s*profit\s*\/\s*(\d+)\s*hr/);
+const oldFormatMatch = returns.match(/(\d+)%\s*daily\s*for\s*(\d+)\s*days/);
+const simpleFormatMatch = returns.match(/(\d+)%\s*for\s*(\d+)\s*days/);
+const monthlyFormatMatch = returns.match(/(\d+)%\s*monthly/);
+
+if (newFormatMatch) {
+  dailyProfitPercent = parseFloat(newFormatMatch[1]);
+  const hours = parseInt(newFormatMatch[2]);
+  validityDays = hours / 24;
+} else if (oldFormatMatch) {
+  dailyProfitPercent = parseFloat(oldFormatMatch[1]);
+  validityDays = parseInt(oldFormatMatch[2]);
+} else if (simpleFormatMatch) {
+  dailyProfitPercent = parseFloat(simpleFormatMatch[1]);
+  validityDays = parseInt(simpleFormatMatch[2]);
+} else if (monthlyFormatMatch) {
+  dailyProfitPercent = parseFloat(monthlyFormatMatch[1]);
+  validityDays = 30; // Assume 1 month = 30 days
+} else {
+  return res.status(400).json({
+    error: 'Invalid returns format',
+  });
+}
+
+const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
+
+      const [orderResult] = await db.query(
+        `INSERT INTO orders 
+         (user_id, user_phone, product_id, product_name, product_image,
+          price, daily_profit, validity_days, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          payment.user_id,
+          cleanPhone,
+          payment.product_id,
+          payment.product_name,
+          payment.product_image,
+          payment.amount,
+          dailyProfit,
+          validityDays
+        ]
+      );
+
+      return res.json({
+        success: true,
+        message: `Payment ${paymentId} marked as completed`,
+        orderCreated: true,
+        orderId: orderResult.insertId
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Payment ${paymentId} updated to ${status}`,
+    });
+
+  } catch (err) {
+    console.error('Error updating payment and creating order:', err);
+    res.status(500).json({
+      error: 'Server error',
+      details: err.message,
+    });
+  }
 });
+
 router.get('/payments/pending', authenticateAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -434,6 +437,41 @@ router.patch('/orders/:id/approve', async (req, res) => {
   } catch (err) {
     console.error('Error approving order:', err);
     res.status(500).json({ error: 'Server error', details: err.message });
+  }
+});
+// Update user balance
+router.patch('/users/balance', authenticateAdmin, async (req, res) => {
+  const { phone, amount } = req.body;
+
+  try {
+    // Validate input
+    if (!phone || !amount) {
+      return res.status(400).json({ error: 'Phone and amount are required' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: 'Amount must be a positive number' });
+    }
+
+    // Update user balance
+    const [result] = await db.query(
+      'UPDATE users SET total_balance = total_balance + ? WHERE phone = ?',
+      [amountNum, phone]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Added ${amountNum} to user's balance` 
+    });
+
+  } catch (err) {
+    console.error('Error updating balance:', err);
+    res.status(500).json({ error: 'Database error', details: err.message });
   }
 });
 
