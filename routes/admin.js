@@ -439,22 +439,8 @@ router.patch('/orders/:id/approve', async (req, res) => {
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
+
 // Update user balance
-router.patch('/users/balance', authenticateAdmin, async (req, res) => {
-  const { phone, amount } = req.body;
-
-  try {
-    // Validate input
-    if (!phone || !amount) {
-      return res.status(400).json({ error: 'Phone and amount are required' });
-    }
-
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      return res.status(400).json({ error: 'Amount must be a positive number' });
-    }
-
-    // Update user balance - Make sure this is defined after the authenticateAdmin middleware
 router.patch('/users/balance', authenticateAdmin, async (req, res) => {
   const { phone, amount } = req.body;
 
@@ -483,7 +469,6 @@ router.patch('/users/balance', authenticateAdmin, async (req, res) => {
       success: true, 
       message: `Added ${amountNum} to user's balance` 
     });
-
   } catch (err) {
     console.error('Error updating balance:', err);
     res.status(500).json({ error: 'Database error', details: err.message });
