@@ -454,6 +454,21 @@ router.patch('/users/balance', authenticateAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Amount must be a positive number' });
     }
 
+    // Update user balance - Make sure this is defined after the authenticateAdmin middleware
+router.patch('/users/balance', authenticateAdmin, async (req, res) => {
+  const { phone, amount } = req.body;
+
+  try {
+    // Validate input
+    if (!phone || !amount) {
+      return res.status(400).json({ error: 'Phone and amount are required' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: 'Amount must be a positive number' });
+    }
+
     // Update user balance
     const [result] = await db.query(
       'UPDATE users SET total_balance = total_balance + ? WHERE phone = ?',
