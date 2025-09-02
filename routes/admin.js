@@ -181,35 +181,90 @@ router.get('/recharges/pending', authenticateAdmin, async (req, res) => {
 router.patch('/recharges/:id/approve', authenticateAdmin, async (req, res) => {
   try {
     await db.query('START TRANSACTION');
-    
-    // Get recharge details first
+
+    // Get recharge details
     const [recharge] = await db.query(
       'SELECT user_id, amount FROM direct_payment WHERE id = ?',
       [req.params.id]
     );
-    
+
     if (recharge.length === 0) {
       await db.query('ROLLBACK');
       return res.status(404).json({ error: 'Recharge not found' });
     }
-    
-    // Convert amount to number
+
+    const userId = recharge[0].user_id;
     const amountNum = parseFloat(recharge[0].amount);
-    
+
     // Update recharge status
     await db.query(
       'UPDATE direct_payment SET status = "completed" WHERE id = ?',
       [req.params.id]
     );
-    
-    // Update user balance
+
+    // Update user total_balance
     await db.query(
       'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-      [amountNum, recharge[0].user_id]
+      [amountNum, userId]
     );
-    
+
+    // --- Handle referral bonuses ---
+    const [userRows] = await db.query(
+      'SELECT level1_id, level2_id, level3_id FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (userRows.length) {
+      const { level1_id, level2_id, level3_id } = userRows[0];
+
+      // Referral percentages
+      const level1Bonus = 0.10;
+      const level2Bonus = 0.02;
+      const level3Bonus = 0.01;
+
+      // Level 1
+      if (level1_id) {
+        const bonus = amountNum * level1Bonus;
+        await db.query(
+          'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+          [bonus, level1_id]
+        );
+        await db.query(
+          'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
+          [level1_id, userId, bonus, 'level1']
+        );
+      }
+
+      // Level 2
+      if (level2_id) {
+        const bonus = amountNum * level2Bonus;
+        await db.query(
+          'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+          [bonus, level2_id]
+        );
+        await db.query(
+          'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
+          [level2_id, userId, bonus, 'level2']
+        );
+      }
+
+      // Level 3
+      if (level3_id) {
+        const bonus = amountNum * level3Bonus;
+        await db.query(
+          'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+          [bonus, level3_id]
+        );
+        await db.query(
+          'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
+          [level3_id, userId, bonus, 'level3']
+        );
+      }
+    }
+
     await db.query('COMMIT');
-    res.json({ success: true });
+    res.json({ success: true, msg: 'Recharge approved and commissions added' });
+
   } catch (err) {
     await db.query('ROLLBACK');
     console.error('Error approving recharge:', err);
