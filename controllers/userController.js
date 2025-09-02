@@ -82,76 +82,72 @@ const loginUser = async (req, res) => {
 const getTeam = async (req, res) => {
   try {
     const userId = req.user.id;
-    
-    const [userData] = await db.query(
-      `SELECT invite_code FROM users WHERE id = ?`,
-      [userId]
-    );
-    
+
+    // Get current user's invite code and total balance
+    const [userData] = await db.query(`SELECT invite_code, total_balance FROM users WHERE id = ?`, [userId]);
     if (!userData || userData.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    
+
     const currentInviteCode = userData[0].invite_code;
+    const inviterBalance = parseFloat(userData[0].total_balance || 0);
 
-    // Level 1: Direct referrals
-    const [level1] = await db.query(
-      `SELECT 
-        u.id, 
-        COALESCE(u.name, 'Unnamed Member') AS name,
-        u.phone,
-        u.created_at AS joinedAt,
-        COALESCE(SUM(e.amount), 0) AS earned,
-        1 AS level
-      FROM users u
-      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
-      WHERE u.invited_by = ?
-      GROUP BY u.id`,
-      [currentInviteCode]
-    );
+    // Commission rates per level
+    const commissionRates = { 1: 0.10, 2: 0.02, 3: 0.01 };
 
-    // Level 2: Referrals of referrals
-    const [level2] = await db.query(
-      `SELECT 
+    // Helper to calculate commission based on inviter's balance
+    const calculateCommission = (level) => +(inviterBalance * commissionRates[level]).toFixed(2);
+
+    // Level 1: direct referrals
+    const [level1] = await db.query(`
+      SELECT 
         u.id,
         COALESCE(u.name, 'Unnamed Member') AS name,
         u.phone,
         u.created_at AS joinedAt,
-        COALESCE(SUM(e.amount), 0) AS earned,
+        1 AS level
+      FROM users u
+      WHERE u.invited_by = ?
+    `, [currentInviteCode]);
+
+    // Level 2: referrals of referrals
+    const [level2] = await db.query(`
+      SELECT 
+        u.id,
+        COALESCE(u.name, 'Unnamed Member') AS name,
+        u.phone,
+        u.created_at AS joinedAt,
         2 AS level
       FROM users u
       JOIN users u1 ON u.invited_by = u1.invite_code
-      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
       WHERE u1.invited_by = ?
-      GROUP BY u.id`,
-      [currentInviteCode]
-    );
+    `, [currentInviteCode]);
 
-    // Level 3: Referrals of referrals of referrals
-    const [level3] = await db.query(
-      `SELECT 
+    // Level 3: referrals of referrals of referrals
+    const [level3] = await db.query(`
+      SELECT 
         u.id,
         COALESCE(u.name, 'Unnamed Member') AS name,
         u.phone,
         u.created_at AS joinedAt,
-        COALESCE(SUM(e.amount), 0) AS earned,
         3 AS level
       FROM users u
       JOIN users u1 ON u.invited_by = u1.invite_code
       JOIN users u2 ON u1.invited_by = u2.invite_code
-      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
       WHERE u2.invited_by = ?
-      GROUP BY u.id`,
-      [currentInviteCode]
-    );
+    `, [currentInviteCode]);
 
-    const members = [...level1, ...level2, ...level3];
-    
+    // Apply commission from inviter's total balance
+    const applyCommission = (members) =>
+      members.map(m => ({ ...m, earned: calculateCommission(m.level) }));
+
+    const members = [...applyCommission(level1), ...applyCommission(level2), ...applyCommission(level3)];
+
     res.json({
       success: true,
       members,
       totalMembers: members.length,
-      totalEarnings: members.reduce((sum, m) => sum + parseFloat(m.earned), 0),
+      totalEarnings: members.reduce((sum, m) => sum + m.earned, 0),
       level1Count: level1.length,
       level2Count: level2.length,
       level3Count: level3.length
@@ -159,10 +155,10 @@ const getTeam = async (req, res) => {
 
   } catch (err) {
     console.error('getTeam error:', err);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: 'Server error fetching team data',
-      error: err.message 
+      error: err.message
     });
   }
 };
