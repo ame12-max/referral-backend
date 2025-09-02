@@ -150,51 +150,54 @@ router.get('/:id/team', async (req, res) => {
   }
 
   try {
-    // same SQL queries for level1, level2, level3 as before
-    // (unchanged code copied from earlier route)
-
+    // Fetch level 1 team
     const [level1] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
-              1 AS level,
-              COALESCE(SUM(e.amount), 0) AS earned
+      `SELECT 
+         u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
+         1 AS level,
+         COALESCE(SUM(e.amount),0) AS earned
        FROM users u
        LEFT JOIN earnings e
-         ON e.user_id = ?
-        AND e.type = 'level1'
-        AND e.description LIKE CONCAT('%from user ', u.id, '%')
+         ON e.type = 'level1'
+        AND e.user_id = u.id
+        AND e.description LIKE CONCAT('%from user ', ?, '%')
        WHERE u.invited_by = (SELECT invite_code FROM users WHERE id = ?)
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
       [userId, userId]
     );
 
+    // Fetch level 2 team
     const [level2] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
-              2 AS level,
-              COALESCE(SUM(e.amount), 0) AS earned
+      `SELECT 
+         u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
+         2 AS level,
+         COALESCE(SUM(e.amount),0) AS earned
        FROM users u
        JOIN users u1 ON u.invited_by = u1.invite_code
        LEFT JOIN earnings e
-         ON e.user_id = ?
-        AND e.type = 'level2'
-        AND e.description LIKE CONCAT('%from user ', u.id, '%')
+         ON e.type = 'level2'
+        AND e.user_id = u.id
+        AND e.description LIKE CONCAT('%from user ', ?, '%')
        WHERE u1.invited_by = (SELECT invite_code FROM users WHERE id = ?)
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
       [userId, userId]
     );
 
+    // Fetch level 3 team
     const [level3] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
-              3 AS level,
-              COALESCE(SUM(e.amount), 0) AS earned
+      `SELECT 
+         u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
+         3 AS level,
+         COALESCE(SUM(e.amount),0) AS earned
        FROM users u
        JOIN users u1 ON u.invited_by = u1.invite_code
        JOIN users u2 ON u1.invited_by = u2.invite_code
        LEFT JOIN earnings e
-         ON e.user_id = ?
-        AND e.type = 'level3'
-        AND e.description LIKE CONCAT('%from user ', u.id, '%')
+         ON e.type = 'level3'
+        AND e.user_id = u.id
+        AND e.description LIKE CONCAT('%from user ', ?, '%')
        WHERE u2.invited_by = (SELECT invite_code FROM users WHERE id = ?)
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
@@ -202,6 +205,7 @@ router.get('/:id/team', async (req, res) => {
     );
 
     const members = [...level1, ...level2, ...level3];
+
     const stats = {
       totalMembers: members.length,
       level1Count: level1.length,
@@ -216,5 +220,6 @@ router.get('/:id/team', async (req, res) => {
     return res.status(500).json({ success: false, error: 'Failed to fetch team data', details: err.message });
   }
 });
+
 
 module.exports = router;
