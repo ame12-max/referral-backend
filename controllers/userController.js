@@ -136,7 +136,6 @@ const loginUser = async (req, res) => {
         phone: user.phone,
         invite_code: user.invite_code,
         total_balance: user.total_balance,
-        recharged_balance: user.recharged_balance,
         withdrawable_balance: user.withdrawable_balance,
       },
     });
@@ -158,9 +157,10 @@ const recharge = async (req, res) => {
       return res.status(400).json({ msg: "Invalid recharge amount" });
     }
 
+    // ✅ Only update total_balance (removed recharged_balance)
     await db.query(
-      "UPDATE users SET recharged_balance = recharged_balance + ?, total_balance = total_balance + ? WHERE id = ?",
-      [amount, amount, userId]
+      "UPDATE users SET total_balance = total_balance + ? WHERE id = ?",
+      [amount, userId]
     );
 
     // Handle referral bonus
