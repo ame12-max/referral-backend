@@ -54,8 +54,20 @@ async function calculateCommissions(userId, amount) {
 router.post('/user/update-balance', async (req, res) => {
   try {
     const { userId, amount } = req.body;
-    
-    // Update user balance
+
+    // Fetch current balance BEFORE update
+    const [userBefore] = await db.query(
+      `SELECT total_balance FROM users WHERE id = ?`,
+      [userId]
+    );
+
+    if (!userBefore.length) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const prevBalance = userBefore[0].total_balance;
+
+    // Update balance
     await db.query(
       `UPDATE users 
        SET total_balance = total_balance + ?,
@@ -63,30 +75,28 @@ router.post('/user/update-balance', async (req, res) => {
        WHERE id = ?`,
       [amount, amount, userId]
     );
-    
-    // Check if balance now exceeds 300 and commissions haven't been paid yet
-    const [user] = await db.query(
-      `SELECT total_balance, commissions_paid FROM users WHERE id = ?`,
+
+    // Fetch new balance AFTER update
+    const [userAfter] = await db.query(
+      `SELECT total_balance FROM users WHERE id = ?`,
       [userId]
     );
-    
-    if (user.length && user[0].total_balance >= 300 && !user[0].commissions_paid) {
-      // Calculate and distribute commissions
-      await calculateCommissions(userId, user[0].total_balance);
-      
-      // Mark commissions as paid for this user
-      await db.query(
-        `UPDATE users SET commissions_paid = 1 WHERE id = ?`,
-        [userId]
-      );
+
+    const newBalance = userAfter[0].total_balance;
+
+    // ✅ Commission logic
+    // If this deposit caused balance to reach >= 300, or if already >= 300 → pay commission on this deposit
+    if (newBalance >= 300) {
+      await calculateCommissions(userId, amount);
     }
-    
-    res.json({ success: true, message: 'Balance updated successfully' });
+
+    res.json({ success: true, message: 'Balance updated and commissions processed' });
   } catch (error) {
     console.error('Error updating balance:', error);
     res.status(500).json({ error: 'Failed to update balance' });
   }
 });
+
 
 // Your existing team route with adjustments for your schema
 router.get('/user/:id/team', async (req, res) => {
