@@ -94,71 +94,69 @@ const getTeam = async (req, res) => {
     
     const currentInviteCode = userData[0].invite_code;
 
-    // Level 1: Direct referrals with commission calculation
-    const [level1] = await db.query(
-      `SELECT 
-        u.id, 
-        COALESCE(u.name, 'Unnamed Member') AS name,
-        u.phone,
-        u.balance,
-        u.created_at AS joinedAt,
-        COALESCE(SUM(e.amount), 0) AS earned,
-        CASE 
-          WHEN u.balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.10
-          ELSE 0 
-        END AS commission,
-        1 AS level
-      FROM users u
-      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
-      WHERE u.invited_by = ?
-      GROUP BY u.id`,
-      [currentInviteCode]
-    );
+    // Level 1
+const [level1] = await db.query(`
+  SELECT 
+    u.id,
+    COALESCE(u.name, 'Unnamed Member') AS name,
+    u.phone,
+    u.created_at AS joinedAt,
+    COALESCE(SUM(e.amount), 0) AS earned,
+    CASE 
+      WHEN inviter.total_balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.10
+      ELSE 0
+    END AS commission,
+    1 AS level
+  FROM users u
+  JOIN users inviter ON inviter.invite_code = u.invited_by
+  LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
+  WHERE inviter.id = ?
+  GROUP BY u.id, inviter.total_balance
+`, [userId]);
 
-    // Level 2: Referrals of referrals with commission calculation
-    const [level2] = await db.query(
-      `SELECT 
-        u.id,
-        COALESCE(u.name, 'Unnamed Member') AS name,
-        u.phone,
-        u.balance,
-        u.created_at AS joinedAt,
-        COALESCE(SUM(e.amount), 0) AS earned,
-        CASE 
-          WHEN u.balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.02
-          ELSE 0 
-        END AS commission,
-        2 AS level
-      FROM users u
-      JOIN users u1 ON u.invited_by = u1.invite_code
-      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
-      WHERE u1.invited_by = ?
-      GROUP BY u.id`,
-      [currentInviteCode]
-    );
+// Level 2
+const [level2] = await db.query(`
+  SELECT 
+    u.id,
+    COALESCE(u.name, 'Unnamed Member') AS name,
+    u.phone,
+    u.created_at AS joinedAt,
+    COALESCE(SUM(e.amount), 0) AS earned,
+    CASE 
+      WHEN inviter2.total_balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.02
+      ELSE 0
+    END AS commission,
+    2 AS level
+  FROM users u
+  JOIN users u1 ON u.invited_by = u1.invite_code
+  JOIN users inviter2 ON inviter2.id = ?  -- the original user
+  LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
+  WHERE u1.invited_by = inviter2.invite_code
+  GROUP BY u.id, inviter2.total_balance
+`, [userId]);
 
-    // Level 3: Referrals of referrals of referrals with commission calculation
-    const [level3] = await db.query(
-      `SELECT 
-        u.id,
-        COALESCE(u.name, 'Unnamed Member') AS name,
-        u.phone,
-        u.balance,
-        u.created_at AS joinedAt,
-        COALESCE(SUM(e.amount), 0) AS earned,
-        CASE 
-          WHEN u.balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.01
-          ELSE 0 
-        END AS commission,
-        3 AS level
-      FROM users u
-      JOIN users u1 ON u.invited_by = u1.invite_code
-      JOIN users u2 ON u1.invited_by = u2.invite_code
-      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
-      WHERE u2.invited_by = ?
-      GROUP BY u.id`,
-      [currentInviteCode]
-    );
+// Level 3
+const [level3] = await db.query(`
+  SELECT 
+    u.id,
+    COALESCE(u.name, 'Unnamed Member') AS name,
+    u.phone,
+    u.created_at AS joinedAt,
+    COALESCE(SUM(e.amount), 0) AS earned,
+    CASE 
+      WHEN inviter3.total_balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.01
+      ELSE 0
+    END AS commission,
+    3 AS level
+  FROM users u
+  JOIN users u1 ON u.invited_by = u1.invite_code
+  JOIN users u2 ON u1.invited_by = u2.invite_code
+  JOIN users inviter3 ON inviter3.id = ?  -- the original user
+  LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
+  WHERE u2.invited_by = inviter3.invite_code
+  GROUP BY u.id, inviter3.total_balance
+`, [userId]);
+
 
     const members = [...level1, ...level2, ...level3];
     
