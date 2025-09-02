@@ -44,6 +44,8 @@ const userStatsRouter = require('./routes/userStatus');
 const withdrawalsRoutes = require('./routes/withdrawals');
 const orderRoutes  = require('./routes/orderRoutes');
 const applyDailyProfits = require('./routes/dailyProfitJob');
+const teamRoutes = require('./routes/team');
+app.use('/api/user', teamRoutes);
 
 cron.schedule('10 0 * * *', async () => {
   console.log('⏰ Running daily profit job...');
