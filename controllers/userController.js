@@ -4,6 +4,70 @@ const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'yourSecretKey';
 
+/**
+ * Handle referral bonus distribution
+ */
+const handleReferralBonus = async (userId, rechargeAmount) => {
+  try {
+    const [userRows] = await db.query(
+      "SELECT level1_id, level2_id, level3_id FROM users WHERE id = ?",
+      [userId]
+    );
+    if (!userRows.length) return;
+
+    const { level1_id, level2_id, level3_id } = userRows[0];
+
+    // Percentages
+    const level1Bonus = 0.10;
+    const level2Bonus = 0.02;
+    const level3Bonus = 0.01;
+
+    // Level 1
+    if (level1_id) {
+      const bonus = rechargeAmount * level1Bonus;
+      await db.query(
+        "UPDATE users SET total_balance = total_balance + ? WHERE id = ?",
+        [bonus, level1_id]
+      );
+      await db.query(
+        "INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)",
+        [level1_id, userId, bonus, "level1"]
+      );
+    }
+
+    // Level 2
+    if (level2_id) {
+      const bonus = rechargeAmount * level2Bonus;
+      await db.query(
+        "UPDATE users SET total_balance = total_balance + ? WHERE id = ?",
+        [bonus, level2_id]
+      );
+      await db.query(
+        "INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)",
+        [level2_id, userId, bonus, "level2"]
+      );
+    }
+
+    // Level 3
+    if (level3_id) {
+      const bonus = rechargeAmount * level3Bonus;
+      await db.query(
+        "UPDATE users SET total_balance = total_balance + ? WHERE id = ?",
+        [bonus, level3_id]
+      );
+      await db.query(
+        "INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)",
+        [level3_id, userId, bonus, "level3"]
+      );
+    }
+  } catch (err) {
+    console.error("Referral bonus error:", err);
+  }
+};
+
+/**
+ * Register user
+ */
 const registerUser = async (req, res) => {
   const { phone, password, referral } = req.body;
 
@@ -43,6 +107,9 @@ const registerUser = async (req, res) => {
   }
 };
 
+/**
+ * Login user
+ */
 const loginUser = async (req, res) => {
   const { phone, password } = req.body;
 
@@ -79,96 +146,90 @@ const loginUser = async (req, res) => {
   }
 };
 
+/**
+ * Recharge user balance + referral bonus
+ */
+const recharge = async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const userId = req.user.id;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ msg: "Invalid recharge amount" });
+    }
+
+    await db.query(
+      "UPDATE users SET recharged_balance = recharged_balance + ?, total_balance = total_balance + ? WHERE id = ?",
+      [amount, amount, userId]
+    );
+
+    // Handle referral bonus
+    await handleReferralBonus(userId, amount);
+
+    res.status(200).json({ success: true, msg: "Recharge successful" });
+  } catch (err) {
+    console.error("Recharge error:", err);
+    res.status(500).json({ msg: "Server error during recharge" });
+  }
+};
+
+/**
+ * Get team details
+ */
 const getTeam = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const [userData] = await db.query(
       `SELECT invite_code FROM users WHERE id = ?`,
       [userId]
     );
-    
+
     if (!userData || userData.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    
-    const currentInviteCode = userData[0].invite_code;
 
-    // Level 1
-const [level1] = await db.query(`
-  SELECT 
-    u.id,
-    COALESCE(u.name, 'Unnamed Member') AS name,
-    u.phone,
-    u.created_at AS joinedAt,
-    COALESCE(SUM(e.amount), 0) AS earned,
-    CASE 
-      WHEN inviter.total_balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.10
-      ELSE 0
-    END AS commission,
-    1 AS level
-  FROM users u
-  JOIN users inviter ON inviter.invite_code = u.invited_by
-  LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
-  WHERE inviter.id = ?
-  GROUP BY u.id, inviter.total_balance
-`, [userId]);
+    const [level1] = await db.query(`
+      SELECT u.id, COALESCE(u.name, 'Unnamed Member') AS name, u.phone, u.created_at AS joinedAt,
+             COALESCE(SUM(e.amount), 0) AS earned, 1 AS level
+      FROM users u
+      JOIN users inviter ON inviter.invite_code = u.invited_by
+      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
+      WHERE inviter.id = ?
+      GROUP BY u.id
+    `, [userId]);
 
-// Level 2
-const [level2] = await db.query(`
-  SELECT 
-    u.id,
-    COALESCE(u.name, 'Unnamed Member') AS name,
-    u.phone,
-    u.created_at AS joinedAt,
-    COALESCE(SUM(e.amount), 0) AS earned,
-    CASE 
-      WHEN inviter2.total_balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.02
-      ELSE 0
-    END AS commission,
-    2 AS level
-  FROM users u
-  JOIN users u1 ON u.invited_by = u1.invite_code
-  JOIN users inviter2 ON inviter2.id = ?  -- the original user
-  LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
-  WHERE u1.invited_by = inviter2.invite_code
-  GROUP BY u.id, inviter2.total_balance
-`, [userId]);
+    const [level2] = await db.query(`
+      SELECT u.id, COALESCE(u.name, 'Unnamed Member') AS name, u.phone, u.created_at AS joinedAt,
+             COALESCE(SUM(e.amount), 0) AS earned, 2 AS level
+      FROM users u
+      JOIN users u1 ON u.invited_by = u1.invite_code
+      JOIN users inviter2 ON inviter2.id = ?
+      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
+      WHERE u1.invited_by = inviter2.invite_code
+      GROUP BY u.id
+    `, [userId]);
 
-// Level 3
-const [level3] = await db.query(`
-  SELECT 
-    u.id,
-    COALESCE(u.name, 'Unnamed Member') AS name,
-    u.phone,
-    u.created_at AS joinedAt,
-    COALESCE(SUM(e.amount), 0) AS earned,
-    CASE 
-      WHEN inviter3.total_balance > 300 THEN COALESCE(SUM(e.amount), 0) * 0.01
-      ELSE 0
-    END AS commission,
-    3 AS level
-  FROM users u
-  JOIN users u1 ON u.invited_by = u1.invite_code
-  JOIN users u2 ON u1.invited_by = u2.invite_code
-  JOIN users inviter3 ON inviter3.id = ?  -- the original user
-  LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
-  WHERE u2.invited_by = inviter3.invite_code
-  GROUP BY u.id, inviter3.total_balance
-`, [userId]);
-
+    const [level3] = await db.query(`
+      SELECT u.id, COALESCE(u.name, 'Unnamed Member') AS name, u.phone, u.created_at AS joinedAt,
+             COALESCE(SUM(e.amount), 0) AS earned, 3 AS level
+      FROM users u
+      JOIN users u1 ON u.invited_by = u1.invite_code
+      JOIN users u2 ON u1.invited_by = u2.invite_code
+      JOIN users inviter3 ON inviter3.id = ?
+      LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
+      WHERE u2.invited_by = inviter3.invite_code
+      GROUP BY u.id
+    `, [userId]);
 
     const members = [...level1, ...level2, ...level3];
-    
-    // Calculate total commission
-    const totalCommission = members.reduce((sum, m) => sum + parseFloat(m.commission), 0);
-    
+    const totalEarnings = members.reduce((sum, m) => sum + parseFloat(m.earned), 0);
+
     res.json({
       success: true,
       members,
       totalMembers: members.length,
-      totalEarnings: members.reduce((sum, m) => sum + parseFloat(m.earned), 0),
-      totalCommission: totalCommission,
+      totalEarnings,
       level1Count: level1.length,
       level2Count: level2.length,
       level3Count: level3.length
@@ -176,35 +237,30 @@ const [level3] = await db.query(`
 
   } catch (err) {
     console.error('getTeam error:', err);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: 'Server error fetching team data',
-      error: err.message 
+      error: err.message
     });
   }
 };
 
+/**
+ * Get account data
+ */
 const getAccountData = async (req, res) => {
   try {
     const [userRows] = await db.query(
-      `SELECT 
-        id, phone, invite_code, 
-        total_balance, today_income
-      FROM users 
-      WHERE id = ?`,
+      `SELECT id, phone, invite_code, total_balance, today_income
+       FROM users WHERE id = ?`,
       [req.user.id]
     );
 
     if (userRows.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        msg: "User not found" 
-      });
+      return res.status(404).json({ success: false, msg: "User not found" });
     }
 
     const user = userRows[0];
-
-    // Calculate total assets dynamically
     const totalBalance = Number(user.total_balance) || 0;
     const todayIncome = Number(user.today_income) || 0;
     const totalAssets = totalBalance + todayIncome;
@@ -218,13 +274,13 @@ const getAccountData = async (req, res) => {
       success: true,
       user: {
         ...user,
-        total_assets: totalAssets, // override with calculated value
+        total_assets: totalAssets,
         bank: bankRows[0] || null
       }
     });
   } catch (err) {
     console.error("Account Data Error:", err);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       msg: "Server error during account data fetch",
       error: err.message
@@ -232,16 +288,19 @@ const getAccountData = async (req, res) => {
   }
 };
 
+/**
+ * Verify token
+ */
 const verifyToken = async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
-  
+
   if (!token) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       success: false,
-      error: 'No token provided' 
+      error: 'No token provided'
     });
   }
-  
+
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     res.json({
@@ -259,6 +318,9 @@ const verifyToken = async (req, res) => {
   }
 };
 
+/**
+ * Get bank info
+ */
 const getBankInfo = async (req, res) => {
   const userId = req.user.id;
 
@@ -267,7 +329,7 @@ const getBankInfo = async (req, res) => {
       "SELECT bank_name, account_holder, account_number FROM bank_details WHERE user_id = ?",
       [userId]
     );
-    
+
     if (!rows.length) return res.status(404).json({ msg: "Bank info not found" });
     res.status(200).json(rows[0]);
   } catch (err) {
@@ -276,6 +338,9 @@ const getBankInfo = async (req, res) => {
   }
 };
 
+/**
+ * Update bank info
+ */
 const updateBankInfo = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -302,14 +367,14 @@ const updateBankInfo = async (req, res) => {
       );
     }
 
-    res.status(200).json({ 
-      bank_name: bank, 
-      account_holder: name, 
-      account_number: number 
+    res.status(200).json({
+      bank_name: bank,
+      account_holder: name,
+      account_number: number
     });
   } catch (err) {
     console.error("Bank save error:", err);
-    res.status(500).json({ 
+    res.status(500).json({
       msg: "Server error",
       error: err.message
     });
@@ -319,6 +384,7 @@ const updateBankInfo = async (req, res) => {
 module.exports = {
   registerUser,
   loginUser,
+  recharge,
   getBankInfo,
   updateBankInfo,
   getTeam,
