@@ -179,99 +179,136 @@ router.get('/recharges/pending', authenticateAdmin, async (req, res) => {
 
 // Approve recharge
 router.patch('/recharges/:id/approve', authenticateAdmin, async (req, res) => {
+  let connection;
   try {
-    await db.query('START TRANSACTION');
-
-    // Get recharge details
-    const [recharge] = await db.query(
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    
+    // Get recharge details first
+    const [recharge] = await connection.query(
       'SELECT user_id, amount FROM direct_payment WHERE id = ?',
       [req.params.id]
     );
-
+    
     if (recharge.length === 0) {
-      await db.query('ROLLBACK');
+      await connection.rollback();
       return res.status(404).json({ error: 'Recharge not found' });
     }
-
+    
     const userId = recharge[0].user_id;
     const amountNum = parseFloat(recharge[0].amount);
-
+    
+    // Get user's current balance and referral info
+    const [user] = await connection.query(
+      'SELECT total_balance, invited_by FROM users WHERE id = ?',
+      [userId]
+    );
+    
+    if (user.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const currentBalance = user[0].total_balance;
+    const invitedBy = user[0].invited_by;
+    const newBalance = currentBalance + amountNum;
+    
     // Update recharge status
-    await db.query(
+    await connection.query(
       'UPDATE direct_payment SET status = "completed" WHERE id = ?',
       [req.params.id]
     );
-
-    // Update user total_balance
-    await db.query(
-      'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-      [amountNum, userId]
+    
+    // Update user balance
+    await connection.query(
+      'UPDATE users SET total_balance = ? WHERE id = ?',
+      [newBalance, userId]
     );
-
-    // --- Handle referral bonuses ---
-    const [userRows] = await db.query(
-      'SELECT level1_id, level2_id, level3_id FROM users WHERE id = ?',
-      [userId]
-    );
-
-    if (userRows.length) {
-      const { level1_id, level2_id, level3_id } = userRows[0];
-
-      // Referral percentages
-      const level1Bonus = 0.10;
-      const level2Bonus = 0.02;
-      const level3Bonus = 0.01;
-
-      // Level 1
-      if (level1_id) {
-        const bonus = amountNum * level1Bonus;
-        await db.query(
-          'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-          [bonus, level1_id]
+    
+    // Check if this recharge qualifies for referral bonuses (balance reaches 500)
+    if (newBalance >= 500 && invitedBy) {
+      // Get the referral chain
+      const [referrer] = await connection.query(
+        'SELECT id, level1_id, level2_id, level3_id FROM users WHERE invite_code = ?',
+        [invitedBy]
+      );
+      
+      if (referrer.length > 0) {
+        const referrerId = referrer[0].id;
+        const level1Id = referrer[0].level1_id;
+        const level2Id = referrer[0].level2_id;
+        const level3Id = referrer[0].level3_id;
+        
+        // Check if bonuses already awarded for this user
+        const [bonusCheck] = await connection.query(
+          "SELECT id FROM bonus_payments WHERE awarded_to = ? AND type = 'balance_threshold'",
+          [userId]
         );
-        await db.query(
-          'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
-          [level1_id, userId, bonus, 'level1']
-        );
-      }
-
-      // Level 2
-      if (level2_id) {
-        const bonus = amountNum * level2Bonus;
-        await db.query(
-          'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-          [bonus, level2_id]
-        );
-        await db.query(
-          'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
-          [level2_id, userId, bonus, 'level2']
-        );
-      }
-
-      // Level 3
-      if (level3_id) {
-        const bonus = amountNum * level3Bonus;
-        await db.query(
-          'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-          [bonus, level3_id]
-        );
-        await db.query(
-          'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
-          [level3_id, userId, bonus, 'level3']
-        );
+        
+        if (bonusCheck.length === 0) {
+          // Calculate bonuses (10%, 2%, 1% of 500)
+          const level1Bonus = 500 * 0.10; // 50 Birr
+          const level2Bonus = 500 * 0.02; // 10 Birr
+          const level3Bonus = 500 * 0.01; // 5 Birr
+          
+          // Award level1 bonus (direct referrer)
+          if (referrerId) {
+            await connection.query(
+              'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+              [level1Bonus, referrerId]
+            );
+            
+            await connection.query(
+              'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
+              [referrerId, userId, level1Bonus, 'level1_bonus']
+            );
+          }
+          
+          // Award level2 bonus
+          if (level1Id) {
+            await connection.query(
+              'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+              [level2Bonus, level1Id]
+            );
+            
+            await connection.query(
+              'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
+              [level1Id, userId, level2Bonus, 'level2_bonus']
+            );
+          }
+          
+          // Award level3 bonus
+          if (level2Id) {
+            await connection.query(
+              'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+              [level3Bonus, level2Id]
+            );
+            
+            await connection.query(
+              'INSERT INTO earnings (user_id, from_user, amount, type) VALUES (?, ?, ?, ?)',
+              [level2Id, userId, level3Bonus, 'level3_bonus']
+            );
+          }
+          
+          // Record that bonuses were awarded for this user
+          await connection.query(
+            'INSERT INTO bonus_payments (awarded_to, awarded_by, amount, type) VALUES (?, ?, ?, ?)',
+            [userId, referrerId, level1Bonus, 'balance_threshold']
+          );
+        }
       }
     }
-
-    await db.query('COMMIT');
-    res.json({ success: true, msg: 'Recharge approved and commissions added' });
-
+    
+    await connection.commit();
+    res.json({ success: true, message: 'Recharge approved and bonuses processed if applicable' });
   } catch (err) {
-    await db.query('ROLLBACK');
+    if (connection) await connection.rollback();
     console.error('Error approving recharge:', err);
     res.status(500).json({ error: 'Database error', details: err.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
-
 // PATCH /api/admin/recharges/:id/reject
 router.patch('/recharges/:id/reject', authenticateAdmin, async (req, res) => {
   try {
