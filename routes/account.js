@@ -1,5 +1,5 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');   // ✅ make sure bcrypt is imported
+const bcrypt = require('bcrypt');   // ✅ make sure bcrypt is imported
 const router = express.Router();
 const db = require('../config/db');
 
