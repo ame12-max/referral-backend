@@ -1,177 +1,219 @@
+// ===============================
+// backend/routes/user.js
+// ===============================
 const express = require('express');
 const router = express.Router();
-const db = require('../config/db');
+const db = require('../config/db'); // mysql2/promise pool recommended
 
-// Function to calculate commissions based on your schema
-async function calculateCommissions(userId, amount) {
-  try {
-    // Get user's referral chain using the level fields from your schema
-    const [user] = await db.query(
-      `SELECT level1_id, level2_id, level3_id FROM users WHERE id = ?`,
-      [userId]
+/**
+ * Helper: get referral chain based on invite_code / invited_by
+ * Assumes schema:
+ *  - users: id, invite_code, invited_by, total_balance, created_at, ...
+ */
+async function getReferralChain(userId, conn) {
+  const [rows] = await conn.query(
+    `SELECT
+       u2.id AS level1_id,
+       u3.id AS level2_id,
+       u4.id AS level3_id
+     FROM users u
+     LEFT JOIN users u2 ON u.invited_by = u2.invite_code
+     LEFT JOIN users u3 ON u2.invited_by = u3.invite_code
+     LEFT JOIN users u4 ON u3.invited_by = u4.invite_code
+     WHERE u.id = ?
+     LIMIT 1`,
+    [userId]
+  );
+  if (!rows.length) return { level1_id: null, level2_id: null, level3_id: null };
+  const { level1_id, level2_id, level3_id } = rows[0];
+  return { level1_id, level2_id, level3_id };
+}
+
+/**
+ * Helper: pay commissions to up to 3 uplines.
+ * - Base is the CURRENT deposit amount (NOT the cumulative balance!)
+ * - We update only columns we are sure exist: total_balance
+ * - We also insert earnings with types level1/level2/level3 and description
+ */
+async function calculateCommissions(userId, depositAmount, conn) {
+  if (!Number.isFinite(+depositAmount) || +depositAmount <= 0) return;
+
+  const chain = await getReferralChain(userId, conn);
+  const plan = [
+    { id: chain.level1_id, pct: 0.10, type: 'level1', level: 1 },
+    { id: chain.level2_id, pct: 0.02, type: 'level2', level: 2 },
+    { id: chain.level3_id, pct: 0.01, type: 'level3', level: 3 },
+  ];
+
+  for (const tier of plan) {
+    if (!tier.id) continue; // skip if no upline at this level
+    const commission = +(depositAmount * tier.pct).toFixed(8);
+
+    // credit the upline's spendable balance (total_balance)
+    await conn.query(
+      `UPDATE users SET total_balance = total_balance + ? WHERE id = ?`,
+      [commission, tier.id]
     );
-    
-    if (!user.length) return;
-    
-    const { level1_id, level2_id, level3_id } = user[0];
-    
-    // Calculate and distribute commissions
-    const commissions = [
-      { userId: level1_id, percentage: 0.10, level: 1 },
-      { userId: level2_id, percentage: 0.02, level: 2 },
-      { userId: level3_id, percentage: 0.01, level: 3 }
-    ];
 
-    for (const commission of commissions) {
-      if (commission.userId) {
-        const commissionAmount = amount * commission.percentage;
-        
-        // Add commission to referrer's total_balance
-        await db.query(
-          `UPDATE users 
-           SET total_balance = total_balance + ?,
-               withdrawable_balance = withdrawable_balance + ?,
-               today_income = today_income + ?,
-               total_assets = total_assets + ?
-           WHERE id = ?`,
-          [commissionAmount, commissionAmount, commissionAmount, commissionAmount, commission.userId]
-        );
-        
-        // Record the commission transaction
-        await db.query(
-          `INSERT INTO earnings (user_id, amount, type, description) 
-           VALUES (?, ?, 'commission', ?)`,
-          [commission.userId, commissionAmount, `Level ${commission.level} commission from user ${userId}`]
-        );
-      }
-    }
-  } catch (error) {
-    console.error('Error calculating commissions:', error);
+    // record the earning for the upline
+    await conn.query(
+      `INSERT INTO earnings (user_id, amount, type, description)
+       VALUES (?, ?, ?, ?)`,
+      [
+        tier.id,
+        commission,
+        tier.type,
+        `Level ${tier.level} commission from user ${userId}`,
+      ]
+    );
   }
 }
 
-// Add this endpoint to handle balance updates and commission calculations
+/**
+ * POST /user/update-balance
+ * Body: { userId: number, amount: number }
+ *
+ * Rules:
+ *  - Add the deposit to the user's balance
+ *  - If the user's NEW balance is >= 300, pay commissions based on THIS deposit
+ *    (so crossing the threshold or already above it both pay commissions)
+ */
 router.post('/user/update-balance', async (req, res) => {
+  const { userId, amount } = req.body || {};
+
+  // basic validation
+  if (!userId || !Number.isFinite(+amount)) {
+    return res.status(400).json({ success: false, error: 'Invalid userId or amount' });
+  }
+  const deposit = +amount;
+  if (deposit <= 0) {
+    return res.status(400).json({ success: false, error: 'Amount must be > 0' });
+  }
+
+  let conn;
   try {
-    const { userId, amount } = req.body;
+    conn = await db.getConnection();
+    await conn.beginTransaction();
 
-    // Fetch current balance BEFORE update
-    const [userBefore] = await db.query(
+    // fetch previous balance
+    const [beforeRows] = await conn.query(
+      `SELECT total_balance FROM users WHERE id = ? FOR UPDATE`,
+      [userId]
+    );
+    if (!beforeRows.length) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const prev = +beforeRows[0].total_balance || 0;
+
+    // apply deposit
+    await conn.query(
+      `UPDATE users SET total_balance = total_balance + ?, total_assets = COALESCE(total_assets, 0) + ? WHERE id = ?`,
+      [deposit, deposit, userId]
+    );
+
+    // fetch new balance
+    const [afterRows] = await conn.query(
       `SELECT total_balance FROM users WHERE id = ?`,
       [userId]
     );
+    const now = +afterRows[0].total_balance || 0;
 
-    if (!userBefore.length) {
-      return res.status(404).json({ error: 'User not found' });
+    // commission trigger: NEW balance >= 300 → pay commission based on THIS deposit
+    if (now >= 300) {
+      await calculateCommissions(userId, deposit, conn);
     }
 
-    const prevBalance = userBefore[0].total_balance;
-
-    // Update balance
-    await db.query(
-      `UPDATE users 
-       SET total_balance = total_balance + ?,
-           total_assets = total_assets + ?
-       WHERE id = ?`,
-      [amount, amount, userId]
-    );
-
-    // Fetch new balance AFTER update
-    const [userAfter] = await db.query(
-      `SELECT total_balance FROM users WHERE id = ?`,
-      [userId]
-    );
-
-    const newBalance = userAfter[0].total_balance;
-
-    // ✅ Commission logic
-    // If this deposit caused balance to reach >= 300, or if already >= 300 → pay commission on this deposit
-    if (newBalance >= 300) {
-      await calculateCommissions(userId, amount);
+    await conn.commit();
+    return res.json({ success: true, message: 'Balance updated and commissions processed' });
+  } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
     }
-
-    res.json({ success: true, message: 'Balance updated and commissions processed' });
-  } catch (error) {
-    console.error('Error updating balance:', error);
-    res.status(500).json({ error: 'Failed to update balance' });
+    console.error('Error updating balance:', err);
+    return res.status(500).json({ success: false, error: 'Failed to update balance' });
+  } finally {
+    if (conn) conn.release();
   }
 });
 
-
-// Your existing team route with adjustments for your schema
+/**
+ * GET /user/:id/team
+ * Returns team lists for 3 levels + stats. Also returns per-member `earned`
+ * by matching earnings.description pattern (since earnings table has no source_user_id).
+ */
 router.get('/user/:id/team', async (req, res) => {
-  try {
-    const userId = req.params.id;
-    
-    // Validate user ID
-    if (!userId || isNaN(userId)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
-    }
+  const userId = +req.params.id;
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ success: false, error: 'Invalid user ID' });
+  }
 
-    // Level 1: Direct referrals (using invited_by field)
+  try {
+    // Level 1
     const [level1] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date,
-        u.total_balance, u.commissions_paid,
-        COALESCE(SUM(e.amount), 0) AS earned
+      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
+              1 AS level,
+              COALESCE(SUM(e.amount), 0) AS earned
        FROM users u
-       LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
+       LEFT JOIN earnings e
+         ON e.user_id = ?
+        AND e.type = 'level1'
+        AND e.description LIKE CONCAT('%from user ', u.id, '%')
        WHERE u.invited_by = (SELECT invite_code FROM users WHERE id = ?)
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
-      [userId]
+      [userId, userId]
     );
 
-    // Level 2: Indirect referrals
+    // Level 2
     const [level2] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date,
-        u.total_balance, u.commissions_paid,
-        COALESCE(SUM(e.amount), 0) AS earned
+      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
+              2 AS level,
+              COALESCE(SUM(e.amount), 0) AS earned
        FROM users u
        JOIN users u1 ON u.invited_by = u1.invite_code
-       LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
+       LEFT JOIN earnings e
+         ON e.user_id = ?
+        AND e.type = 'level2'
+        AND e.description LIKE CONCAT('%from user ', u.id, '%')
        WHERE u1.invited_by = (SELECT invite_code FROM users WHERE id = ?)
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
-      [userId]
+      [userId, userId]
     );
 
-    // Level 3: Further indirect referrals
+    // Level 3
     const [level3] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date,
-        u.total_balance, u.commissions_paid,
-        COALESCE(SUM(e.amount), 0) AS earned
+      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
+              3 AS level,
+              COALESCE(SUM(e.amount), 0) AS earned
        FROM users u
        JOIN users u1 ON u.invited_by = u1.invite_code
        JOIN users u2 ON u1.invited_by = u2.invite_code
-       LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
+       LEFT JOIN earnings e
+         ON e.user_id = ?
+        AND e.type = 'level3'
+        AND e.description LIKE CONCAT('%from user ', u.id, '%')
        WHERE u2.invited_by = (SELECT invite_code FROM users WHERE id = ?)
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
-      [userId]
+      [userId, userId]
     );
 
-    // Calculate team statistics
+    const members = [...level1, ...level2, ...level3];
     const stats = {
-      totalMembers: level1.length + level2.length + level3.length,
+      totalMembers: members.length,
       level1Count: level1.length,
       level2Count: level2.length,
       level3Count: level3.length,
-      totalEarnings: 
-        level1.reduce((sum, m) => sum + m.earned, 0) +
-        level2.reduce((sum, m) => sum + m.earned, 0) +
-        level3.reduce((sum, m) => sum + m.earned, 0)
+      totalEarnings: members.reduce((s, m) => s + (+m.earned || 0), 0),
     };
 
-    res.json({
-      members: [...level1, ...level2, ...level3],
-      ...stats
-    });
-  } catch (error) {
-    console.error('Error fetching team data:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch team data',
-      details: error.message 
-    });
+    return res.json({ success: true, members, ...stats });
+  } catch (err) {
+    console.error('Error fetching team data:', err);
+    return res.status(500).json({ success: false, error: 'Failed to fetch team data', details: err.message });
   }
 });
 
