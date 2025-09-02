@@ -183,105 +183,124 @@ router.patch('/recharges/:id/approve', authenticateAdmin, async (req, res) => {
   try {
     connection = await db.getConnection();
     await connection.beginTransaction();
-
-    // Get recharge details first
+    
+    // Get recharge details
     const [recharge] = await connection.query(
       'SELECT user_id, amount FROM direct_payment WHERE id = ?',
       [req.params.id]
     );
-
+    
     if (recharge.length === 0) {
       await connection.rollback();
       return res.status(404).json({ error: 'Recharge not found' });
     }
-
+    
     const userId = recharge[0].user_id;
     const amountNum = parseFloat(recharge[0].amount);
-
+    
     // Get user's current balance and referral info
     const [user] = await connection.query(
       'SELECT total_balance, invited_by FROM users WHERE id = ?',
       [userId]
     );
-
+    
     if (user.length === 0) {
       await connection.rollback();
       return res.status(404).json({ error: 'User not found' });
     }
-
+    
     const currentBalance = parseFloat(user[0].total_balance) || 0;
     const invitedBy = user[0].invited_by;
     const newBalance = currentBalance + amountNum;
-
+    
     // Update recharge status
     await connection.query(
       'UPDATE direct_payment SET status = "completed" WHERE id = ?',
       [req.params.id]
     );
-
+    
     // Update user balance
     await connection.query(
       'UPDATE users SET total_balance = ? WHERE id = ?',
       [newBalance, userId]
     );
-
-    // Process referral bonuses based on the recharge amount
-    if (invitedBy) {
+    
+    // Check if this recharge qualifies for referral bonuses
+    if (newBalance >= 500 && invitedBy) {
+      // Get the referral chain
       const [referrer] = await connection.query(
-        'SELECT id, level1_id, level2_id FROM users WHERE invite_code = ?',
+        'SELECT id, level1_id, level2_id, level3_id FROM users WHERE invite_code = ?',
         [invitedBy]
       );
-
+      
       if (referrer.length > 0) {
         const referrerId = referrer[0].id;
         const level1Id = referrer[0].level1_id;
         const level2Id = referrer[0].level2_id;
-
-        // Calculate bonuses based on the recharge amount
-        const level1Bonus = amountNum * 0.10; // 10%
-        const level2Bonus = amountNum * 0.02; // 2%
-        const level3Bonus = amountNum * 0.01; // 1%
-
-        // Award level 1 bonus to the direct referrer
-        if (referrerId) {
+        const level3Id = referrer[0].level3_id;
+        
+        // Check if bonuses already awarded for this user
+        const [bonusCheck] = await connection.query(
+          "SELECT id FROM bonus_payments WHERE awarded_to = ? AND type = 'balance_threshold'",
+          [userId]
+        );
+        
+        if (bonusCheck.length === 0) {
+          // Calculate bonuses based on percentages of the recharge amount
+          const level1Bonus = amountNum * 0.10; // 10%
+          const level2Bonus = amountNum * 0.02; // 2%
+          const level3Bonus = amountNum * 0.01; // 1%
+          
+          // Award level1 bonus (direct referrer)
+          if (referrerId) {
+            await connection.query(
+              'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+              [level1Bonus, referrerId]
+            );
+            
+            await connection.query(
+              'INSERT INTO earnings (user_id, amount, type) VALUES (?, ?, ?)',
+              [referrerId, level1Bonus, 'bonus']
+            );
+          }
+          
+          // Award level2 bonus
+          if (level1Id) {
+            await connection.query(
+              'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+              [level2Bonus, level1Id]
+            );
+            
+            await connection.query(
+              'INSERT INTO earnings (user_id, amount, type) VALUES (?, ?, ?)',
+              [level1Id, level2Bonus, 'bonus']
+            );
+          }
+          
+          // Award level3 bonus
+          if (level2Id) {
+            await connection.query(
+              'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+              [level3Bonus, level2Id]
+            );
+            
+            await connection.query(
+              'INSERT INTO earnings (user_id, amount, type) VALUES (?, ?, ?)',
+              [level2Id, level3Bonus, 'bonus']
+            );
+          }
+          
+          // Record that bonuses were awarded for this user
           await connection.query(
-            'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-            [level1Bonus, referrerId]
-          );
-          await connection.query(
-            'INSERT INTO earnings (user_id, amount, type, source_id) VALUES (?, ?, ?, ?)',
-            [referrerId, level1Bonus, 'recharge_bonus', userId]
-          );
-        }
-
-        // Award level 2 bonus
-        if (level1Id) {
-          await connection.query(
-            'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-            [level2Bonus, level1Id]
-          );
-          await connection.query(
-            'INSERT INTO earnings (user_id, amount, type, source_id) VALUES (?, ?, ?, ?)',
-            [level1Id, level2Bonus, 'recharge_bonus', userId]
-          );
-        }
-
-        // Award level 3 bonus
-        if (level2Id) {
-          await connection.query(
-            'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
-            [level3Bonus, level2Id]
-          );
-          await connection.query(
-            'INSERT INTO earnings (user_id, amount, type, source_id) VALUES (?, ?, ?, ?)',
-            [level2Id, level3Bonus, 'recharge_bonus', userId]
+            'INSERT INTO bonus_payments (awarded_to, awarded_by, amount, type) VALUES (?, ?, ?, ?)',
+            [userId, referrerId, level1Bonus, 'balance_threshold']
           );
         }
       }
     }
-
+    
     await connection.commit();
-    res.json({ success: true, message: 'Recharge approved and bonuses processed' });
+    res.json({ success: true, message: 'Recharge approved and bonuses processed if applicable' });
   } catch (err) {
     if (connection) await connection.rollback();
     console.error('Error approving recharge:', err);
