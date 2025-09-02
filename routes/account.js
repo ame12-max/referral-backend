@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');   // ✅ make sure bcrypt is imported
 const router = express.Router();
 const db = require('../config/db');
 
@@ -67,10 +68,13 @@ router.get('/user/:id/account', async (req, res) => {
 
 // ✅ Change password route
 router.post('/change-password', async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  const userId = req.user.id; // Assuming you have authentication middleware
+  const { currentPassword, newPassword, userId } = req.body;  // 👈 take it from body
 
   try {
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID required' });
+    }
+
     // Validate input
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Current password and new password are required' });
@@ -81,39 +85,23 @@ router.post('/change-password', async (req, res) => {
     }
 
     // Get user's current password hash
-    const [users] = await db.query(
-      'SELECT password FROM users WHERE id = ?',
-      [userId]
-    );
+    const [users] = await db.query('SELECT password FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) return res.status(404).json({ error: 'User not found' });
 
-    if (users.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Verify current password (assuming passwords are hashed)
+    // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, users[0].password);
-    if (!isMatch) {
-      return res.status(400).json({ error: 'Current password is incorrect' });
-    }
+    if (!isMatch) return res.status(400).json({ error: 'Current password is incorrect' });
 
     // Hash new password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update password in database
-    await db.query(
-      'UPDATE users SET password = ? WHERE id = ?',
-      [hashedPassword, userId]
-    );
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await db.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
 
     res.json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
     console.error('Error changing password:', error);
-    res.status(500).json({ 
-      error: 'Failed to change password',
-      message: error.message
-    });
+    res.status(500).json({ error: 'Failed to change password', message: error.message });
   }
 });
+
 
 module.exports = router;
