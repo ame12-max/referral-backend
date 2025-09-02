@@ -143,14 +143,14 @@ router.post('/user/update-balance', async (req, res) => {
  * Returns team lists for 3 levels + stats. Also returns per-member `earned`
  * by matching earnings.description pattern (since earnings table has no source_user_id).
  */
-router.get('/:id/team', async (req, res) => {
+router.get('/:id', async (req, res) => {
   const userId = +req.params.id;
   if (!Number.isFinite(userId)) {
     return res.status(400).json({ success: false, error: 'Invalid user ID' });
   }
 
   try {
-    // Fetch level 1 team
+    // Level 1 team
     const [level1] = await db.query(
       `SELECT 
          u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
@@ -167,7 +167,7 @@ router.get('/:id/team', async (req, res) => {
       [userId, userId]
     );
 
-    // Fetch level 2 team
+    // Level 2 team
     const [level2] = await db.query(
       `SELECT 
          u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
@@ -185,7 +185,7 @@ router.get('/:id/team', async (req, res) => {
       [userId, userId]
     );
 
-    // Fetch level 3 team
+    // Level 3 team
     const [level3] = await db.query(
       `SELECT 
          u.id, u.name, u.phone, u.created_at AS joined_date, u.total_balance,
