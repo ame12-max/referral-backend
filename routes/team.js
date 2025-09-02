@@ -4,75 +4,91 @@ const db = require('../config/db');
 
 router.get('/user/:id/team', async (req, res) => {
   try {
-    const userId = req.params.id;
-    
-    // Validate user ID
-    if (!userId || isNaN(userId)) {
+    const userId = parseInt(req.params.id, 10);
+    if (!userId) {
       return res.status(400).json({ error: 'Invalid user ID' });
     }
 
-    // Level 1: Direct referrals
+    const applyCommission = (balance, rate) =>
+      balance > 300 ? parseFloat(balance) * rate : 0;
+
+    // Level 1: directly referred by this user
     const [level1] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date,
-        COALESCE(SUM(e.amount), 0) AS earned
-       FROM users u
-       LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level1'
-       WHERE u.referred_by = ?
-       GROUP BY u.id
-       ORDER BY u.created_at DESC`,
+      `SELECT id, name, phone, created_at, total_balance
+       FROM users
+       WHERE level1_id = ?
+       ORDER BY created_at DESC`,
       [userId]
     );
 
-    // Level 2: Indirect referrals (user's referrals' referrals)
+    const level1WithCommission = level1.map(m => ({
+      ...m,
+      earned: applyCommission(m.total_balance, 0.10),
+      level: 1
+    }));
+
+    // Level 2: referred by level 1
     const [level2] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date,
-        COALESCE(SUM(e.amount), 0) AS earned
-       FROM users u
-       JOIN users u1 ON u.referred_by = u1.id
-       LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level2'
-       WHERE u1.referred_by = ?
-       GROUP BY u.id
-       ORDER BY u.created_at DESC`,
+      `SELECT id, name, phone, created_at, total_balance
+       FROM users
+       WHERE level2_id = ?
+       ORDER BY created_at DESC`,
       [userId]
     );
 
-    // Level 3: Further indirect referrals
+    const level2WithCommission = level2.map(m => ({
+      ...m,
+      earned: applyCommission(m.total_balance, 0.02),
+      level: 2
+    }));
+
+    // Level 3: referred by level 2
     const [level3] = await db.query(
-      `SELECT u.id, u.name, u.phone, u.created_at AS joined_date,
-        COALESCE(SUM(e.amount), 0) AS earned
-       FROM users u
-       JOIN users u1 ON u.referred_by = u1.id
-       JOIN users u2 ON u1.referred_by = u2.id
-       LEFT JOIN earnings e ON e.user_id = u.id AND e.type = 'level3'
-       WHERE u2.referred_by = ?
-       GROUP BY u.id
-       ORDER BY u.created_at DESC`,
+      `SELECT id, name, phone, created_at, total_balance
+       FROM users
+       WHERE level3_id = ?
+       ORDER BY created_at DESC`,
       [userId]
     );
 
-    // Calculate team statistics
+    const level3WithCommission = level3.map(m => ({
+      ...m,
+      earned: applyCommission(m.total_balance, 0.01),
+      level: 3
+    }));
+
+    // Stats
     const stats = {
-      totalMembers: level1.length + level2.length + level3.length,
-      level1Count: level1.length,
-      level2Count: level2.length,
-      level3Count: level3.length,
-      totalEarnings: 
-        level1.reduce((sum, m) => sum + m.earned, 0) +
-        level2.reduce((sum, m) => sum + m.earned, 0) +
-        level3.reduce((sum, m) => sum + m.earned, 0)
+      totalMembers:
+        level1WithCommission.length +
+        level2WithCommission.length +
+        level3WithCommission.length,
+      level1Count: level1WithCommission.length,
+      level2Count: level2WithCommission.length,
+      level3Count: level3WithCommission.length,
+      totalEarnings:
+        level1WithCommission.reduce((s, m) => s + m.earned, 0) +
+        level2WithCommission.reduce((s, m) => s + m.earned, 0) +
+        level3WithCommission.reduce((s, m) => s + m.earned, 0)
     };
 
     res.json({
-      members: [...level1, ...level2, ...level3],
+      success: true,
+      members: [
+        ...level1WithCommission,
+        ...level2WithCommission,
+        ...level3WithCommission
+      ],
       ...stats
     });
   } catch (error) {
     console.error('Error fetching team data:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to fetch team data',
-      details: error.message 
+      details: error.message
     });
   }
 });
+
 
 module.exports = router;
