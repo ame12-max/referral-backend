@@ -566,6 +566,40 @@ router.patch('/users/balance', authenticateAdmin, async (req, res) => {
     res.status(500).json({ error: 'Database error', details: err.message });
   }
 });
+// Set user balance (replace current balance)
+router.patch('/users/set-balance', authenticateAdmin, async (req, res) => {
+  const { phone, amount } = req.body;
+
+  try {
+    // Validate input
+    if (!phone || !amount) {
+      return res.status(400).json({ error: 'Phone and amount are required' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum < 0) {
+      return res.status(400).json({ error: 'Amount must be a positive number' });
+    }
+
+    // Update user balance (set to the exact amount)
+    const [result] = await db.query(
+      'UPDATE users SET total_balance = ? WHERE phone = ?',
+      [amountNum, phone]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `User balance set to ${amountNum}` 
+    });
+  } catch (err) {
+    console.error('Error setting balance:', err);
+    res.status(500).json({ error: 'Database error', details: err.message });
+  }
+});
 
 
 module.exports = router;
