@@ -5,39 +5,91 @@ const crypto = require('crypto');
 const { authenticateUser } = require('../middleware/auth');
 const authenticateAdmin = require('../middleware/adminAuth');
 
-// ✅ Generate gift code (Admin endpoint)
-router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
-  const { amount } = req.body;
-  
+// ✅ Redeem gift code (User endpoint) - UPDATED for multiple redemptions
+router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
+  const { code } = req.body;
+  const userId = req.user.id;
+
   try {
-    // Validate amount
-    if (!amount || amount > 10 || amount <= 0) {
-      return res.status(400).json({ error: 'Valid amount is required (0-10 Birr)' });
+    if (!code) {
+      return res.status(400).json({ error: 'Gift code is required' });
     }
 
-    // Generate unique code
-    const code = crypto.randomBytes(6).toString('hex').toUpperCase();
-    const expiresAt = new Date(Date.now() + 30 * 60000); // 30 minutes from now
-
-    // Save to database
-    await db.query(
-      'INSERT INTO gift_codes (code, amount, expires_at) VALUES (?, ?, ?)',
-      [code, amount, expiresAt]
+    // Check if code exists and is valid (not expired)
+    const [giftCodes] = await db.query(
+      'SELECT * FROM gift_codes WHERE code = ? AND expires_at > NOW()',
+      [code]
     );
 
-    res.json({ 
-      success: true, 
-      message: 'Gift code generated successfully',
-      code,
-      amount,
-      expires_at: expiresAt
-    });
+    if (giftCodes.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired gift code' });
+    }
+
+    const giftCode = giftCodes[0];
+    const amount = parseFloat(giftCode.amount);
+
+    // Verify user exists
+    const [users] = await db.query('SELECT id FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if this user has already redeemed this code
+    const [existingRedemptions] = await db.query(
+      'SELECT * FROM gift_code_redemptions WHERE code_id = ? AND user_id = ?',
+      [giftCode.id, userId]
+    );
+
+    if (existingRedemptions.length > 0) {
+      return res.status(400).json({ error: 'You have already redeemed this gift code' });
+    }
+
+    // Start transaction
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // Record the redemption
+      await connection.query(
+        'INSERT INTO gift_code_redemptions (code_id, user_id) VALUES (?, ?)',
+        [giftCode.id, userId]
+      );
+
+      // Update user balance
+      await connection.query(
+        'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+        [amount, userId]
+      );
+
+      // Record transaction
+      try {
+        await connection.query(
+          'INSERT INTO transactions (user_id, amount, type, status, description) VALUES (?, ?, "gift", "completed", ?)',
+          [userId, amount, `Gift code redemption: ${code}`]
+        );
+      } catch (transactionError) {
+        console.warn('Could not record transaction:', transactionError.message);
+        // Continue without recording the transaction
+      }
+
+      await connection.commit();
+      res.json({ 
+        success: true, 
+        message: `Successfully redeemed ${amount} Birr gift code`,
+        amount 
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('Transaction error:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
   } catch (error) {
-    console.error('Error generating gift code:', error);
-    res.status(500).json({ error: 'Failed to generate gift code' });
+    console.error('Error redeeming gift code:', error);
+    res.status(500).json({ error: 'Failed to redeem gift code' });
   }
 });
-
 // ✅ Redeem gift code (User endpoint) - FIXED
 router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
   const { code } = req.body;
