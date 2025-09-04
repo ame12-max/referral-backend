@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const authenticateAdmin = require('../middleware/adminAuth'); // Import the shared middleware
 
 // Admin login endpoint
 router.post('/login', async (req, res) => {
