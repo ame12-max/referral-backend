@@ -1,8 +1,9 @@
-// Add to your server.js or create a new route file
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const crypto = require('crypto');
+const { authenticateUser } = require('../middleware/auth'); // Your user auth middleware
+const authenticateAdmin = require('../middleware/authAdmin'); // Your admin auth middleware
 
 // ✅ Generate gift code (Admin endpoint)
 router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
@@ -10,8 +11,8 @@ router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
   
   try {
     // Validate amount
-    if (!amount || amount > 10) {
-      return res.status(400).json({ error: 'Amount is required and cannot exceed 10 Birr' });
+    if (!amount || amount > 10 || amount <= 0) {
+      return res.status(400).json({ error: 'Valid amount is required (0-10 Birr)' });
     }
 
     // Generate unique code
@@ -38,7 +39,7 @@ router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
 });
 
 // ✅ Redeem gift code (User endpoint)
-router.post('/user/redeem-gift', authenticateToken, async (req, res) => {
+router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
   const { code } = req.body;
   const userId = req.user.id;
 
