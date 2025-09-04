@@ -45,6 +45,8 @@ const orderRoutes  = require('./routes/orderRoutes');
 const applyDailyProfits = require('./routes/dailyProfitJob');
 const teamRoutes = require('./routes/team');
 const accountRoutes = require('./routes/account');
+const giftRoutes = require('./routes/giftRoutes');
+app.use('/api', giftRoutes);
 
 app.use('/api/user', teamRoutes);
 app.use('/api/user', accountRoutes);
