@@ -430,7 +430,7 @@ const dailyProfit = (payment.amount * dailyProfitPercent) / 100;
           payment.product_image,
           payment.amount,
           dailyProfit,
-          validityDays
+          54
         ]
       );
 
