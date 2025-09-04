@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const cron = require('node-cron');
 
 dotenv.config();
 const app = express();
@@ -49,12 +48,6 @@ const accountRoutes = require('./routes/account');
 
 app.use('/api/user', teamRoutes);
 app.use('/api/user', accountRoutes);
-
-cron.schedule('10 0 * * *', async () => {
-  console.log('⏰ Running daily profit job...');
-  await applyDailyProfits();
-});
-
 
 // ✅ Admin routes (ADD THIS SECTION)
 const adminRoutes = require('./routes/admin');
