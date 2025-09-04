@@ -2,8 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const crypto = require('crypto');
-const authenticateAdmin = require('../middleware/authAdmin'); // Use the shared middleware
-
+const authenticateAdmin = require('../middleware/adminAuth'); // Use the shared middleware
 // ✅ Generate gift code (Admin endpoint)
 router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
   const { amount } = req.body;
