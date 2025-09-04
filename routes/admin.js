@@ -601,5 +601,55 @@ router.patch('/users/set-balance', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Decrease user balance
+router.patch('/users/decrease-balance', authenticateAdmin, async (req, res) => {
+  const { phone, amount } = req.body;
+
+  try {
+    // Validate input
+    if (!phone || !amount) {
+      return res.status(400).json({ error: 'Phone and amount are required' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: 'Amount must be a positive number' });
+    }
+
+    // Check current balance first
+    const [rows] = await db.query(
+      'SELECT total_balance FROM users WHERE phone = ?',
+      [phone]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const currentBalance = parseFloat(rows[0].total_balance);
+    if (currentBalance < amountNum) {
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+
+    // Decrease user balance
+    const [result] = await db.query(
+      'UPDATE users SET total_balance = total_balance - ? WHERE phone = ?',
+      [amountNum, phone]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      message: `Decreased ${amountNum} from user's balance`
+    });
+  } catch (err) {
+    console.error('Error decreasing balance:', err);
+    res.status(500).json({ error: 'Database error', details: err.message });
+  }
+});
+
 
 module.exports = router;
