@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const crypto = require('crypto');
-const authenticateAdmin = require('../middleware/adminAuth'); // Use the shared middleware
+const authenticateUser = require('../middleware/auth'); // Import user auth middleware
+const authenticateAdmin = require('../middleware/adminAuth'); // Use the same middleware
+
 // ✅ Generate gift code (Admin endpoint)
 router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
   const { amount } = req.body;
@@ -36,16 +38,11 @@ router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
   }
 });
 
-// ✅ Redeem gift code (User endpoint)
-// Note: This should be in a different file or use a different middleware
-// For now, I'll keep it here but you might want to move it to a user routes file
-router.post('/user/redeem-gift', async (req, res) => {
+// ✅ Redeem gift code (User endpoint) - FIXED
+router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
   const { code } = req.body;
-  
-  // This endpoint should use user authentication, not admin authentication
-  // You'll need to implement user authentication for this endpoint
-  // For now, I'll remove the authentication to make it work
-  
+  const userId = req.user.id;
+
   try {
     if (!code) {
       return res.status(400).json({ error: 'Gift code is required' });
@@ -72,19 +69,19 @@ router.post('/user/redeem-gift', async (req, res) => {
       // Mark code as used
       await connection.query(
         'UPDATE gift_codes SET is_used = TRUE, used_by = ?, used_at = NOW() WHERE id = ?',
-        [1, giftCode.id] // You'll need to get the actual user ID from authentication
+        [userId, giftCode.id]
       );
 
-      // Update user balance
+      // Update user balance - use total_balance instead of balance
       await connection.query(
-        'UPDATE users SET balance = balance + ? WHERE id = ?',
-        [amount, 1] // You'll need to get the actual user ID from authentication
+        'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
+        [amount, userId]
       );
 
       // Record transaction
       await connection.query(
         'INSERT INTO transactions (user_id, amount, type, status, description) VALUES (?, ?, "gift", "completed", ?)',
-        [1, amount, `Gift code redemption: ${code}`] // You'll need to get the actual user ID from authentication
+        [userId, amount, `Gift code redemption: ${code}`]
       );
 
       await connection.commit();
@@ -95,6 +92,7 @@ router.post('/user/redeem-gift', async (req, res) => {
       });
     } catch (error) {
       await connection.rollback();
+      console.error('Transaction error:', error);
       throw error;
     } finally {
       connection.release();
