@@ -5,9 +5,9 @@ const crypto = require('crypto');
 const { authenticateUser } = require('../middleware/auth');
 const authenticateAdmin = require('../middleware/adminAuth');
 
-// ✅ Generate gift code (Admin endpoint)
+// ✅ Generate gift code (Admin endpoint) - Fixed without max_uses
 router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
-  const { amount, maxUses = 1 } = req.body;
+  const { amount } = req.body;
   
   try {
     // Validate amount
@@ -17,12 +17,12 @@ router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
 
     // Generate unique code
     const code = crypto.randomBytes(6).toString('hex').toUpperCase();
-    const expiresAt = new Date(Date.now() + 30 * 60000); // 30 minutes from now
+    const expiresAt = new Date(Date.now() + 10 * 60000); // 30 minutes from now
 
-    // Save to database
+    // Save to database without max_uses column
     await db.query(
-      'INSERT INTO gift_codes (code, amount, expires_at, max_uses) VALUES (?, ?, ?, ?)',
-      [code, amount, expiresAt, maxUses]
+      'INSERT INTO gift_codes (code, amount, expires_at) VALUES (?, ?, ?)',
+      [code, amount, expiresAt]
     );
 
     res.json({ 
@@ -30,7 +30,6 @@ router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
       message: 'Gift code generated successfully',
       code,
       amount,
-      max_uses: maxUses,
       expires_at: expiresAt
     });
   } catch (error) {
@@ -76,16 +75,6 @@ router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
 
     if (existingRedemptions.length > 0) {
       return res.status(400).json({ error: 'You have already redeemed this gift code' });
-    }
-
-    // Check if code has reached its maximum uses
-    const [redemptionCount] = await db.query(
-      'SELECT COUNT(*) as count FROM gift_code_redemptions WHERE code_id = ?',
-      [giftCode.id]
-    );
-
-    if (giftCode.max_uses > 0 && redemptionCount[0].count >= giftCode.max_uses) {
-      return res.status(400).json({ error: 'This gift code has reached its maximum redemption limit' });
     }
 
     // Start transaction
