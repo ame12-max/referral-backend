@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../config/db');
 const crypto = require('crypto');
 const { authenticateUser } = require('../middleware/auth'); // Your user auth middleware
-const authenticateAdmin = require('../middleware/authAdmin'); // Your admin auth middleware
+const authenticateAdmin = require('../middleware/adminAuth'); // Use the same middleware
 
 // ✅ Generate gift code (Admin endpoint)
 router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
@@ -37,7 +37,6 @@ router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to generate gift code' });
   }
 });
-
 // ✅ Redeem gift code (User endpoint)
 router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
   const { code } = req.body;
