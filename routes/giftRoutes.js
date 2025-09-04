@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const crypto = require('crypto');
-const authenticateUser = require('../middleware/auth'); // Import user auth middleware
-const authenticateAdmin = require('../middleware/adminAuth'); // Use the same middleware
+const { authenticateUser } = require('../middleware/auth');
+const authenticateAdmin = require('../middleware/adminAuth');
 
 // ✅ Generate gift code (Admin endpoint)
 router.post('/admin/generate-gift', authenticateAdmin, async (req, res) => {
@@ -61,6 +61,12 @@ router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
     const giftCode = giftCodes[0];
     const amount = parseFloat(giftCode.amount);
 
+    // Verify user exists
+    const [users] = await db.query('SELECT id FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     // Start transaction
     const connection = await db.getConnection();
     await connection.beginTransaction();
@@ -72,7 +78,7 @@ router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
         [userId, giftCode.id]
       );
 
-      // Update user balance - use total_balance instead of balance
+      // Update user balance
       await connection.query(
         'UPDATE users SET total_balance = total_balance + ? WHERE id = ?',
         [amount, userId]
@@ -93,6 +99,12 @@ router.post('/user/redeem-gift', authenticateUser, async (req, res) => {
     } catch (error) {
       await connection.rollback();
       console.error('Transaction error:', error);
+      
+      // Handle foreign key constraint error specifically
+      if (error.code === 'ER_NO_REFERENCED_ROW_2' || error.code === 'ER_NO_REFERENCED_ROW') {
+        return res.status(400).json({ error: 'Invalid user account' });
+      }
+      
       throw error;
     } finally {
       connection.release();
